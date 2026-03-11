@@ -96,18 +96,25 @@ void MainWindow::onFitView() {
 }
 
 void MainWindow::onToggleWireframe() {
-    const int mode = m_actionWireframe->isChecked() ? 1 : 0;
-    m_rhiWidget->setRenderMode(mode);
+    if (m_actionWireframe->isChecked()) {
+        m_actionNormals->setChecked(false);
+        m_rhiWidget->setRenderMode(1);
+    } else {
+        m_rhiWidget->setRenderMode(0);
+    }
 }
 
 void MainWindow::onToggleNormals() {
-    const int mode = m_actionNormals->isChecked() ? 2 : 0;
-    m_rhiWidget->setRenderMode(mode);
+    if (m_actionNormals->isChecked()) {
+        m_actionWireframe->setChecked(false);
+        m_rhiWidget->setRenderMode(2);
+    } else {
+        m_rhiWidget->setRenderMode(0);
+    }
 }
 
 void MainWindow::onToggleProjection() {
-    // 暂时跳过投影切换
-    QMessageBox::information(this, "Info", "Projection switching not implemented yet");
+    m_rhiWidget->toggleProjection();
 }
 
 void MainWindow::onMaterialSettings() {

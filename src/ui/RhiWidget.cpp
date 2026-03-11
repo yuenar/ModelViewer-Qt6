@@ -2,6 +2,7 @@
 #include "../renderer/RhiRenderer.h"
 #include "../loader/ModelLoader.h"
 #include "../math/BoundingBox.h"
+#include "../math/Camera.h"
 #include <QMouseEvent>
 #include <QWheelEvent>
 #include <QFileDialog>
@@ -52,17 +53,17 @@ void RhiWidget::loadModel(const QString& filePath) {
     
     qDeleteAll(m_meshes);
     m_meshes.clear();
+    m_sceneBbox = BoundingBox();
     
     ModelLoader loader;
     const auto cpuMeshes = loader.loadCPU(filePath);
     
-    BoundingBox sceneBbox;
     for (const auto& cpuMesh : cpuMeshes) {
         auto* mesh = new RhiMesh(nullptr, cpuMesh);
         m_meshes.append(mesh);
-        sceneBbox.expand(cpuMesh.bbox);
+        m_sceneBbox.expand(cpuMesh.bbox);
     }
-    m_camera.fitToView(sceneBbox);
+    m_camera.fitToView(m_sceneBbox);
     
     // 重置renderer的上传标志
     if (m_renderer) {
@@ -91,10 +92,7 @@ void RhiWidget::setLight(const Light& light) {
 
 void RhiWidget::fitToView() {
     if (!m_meshes.isEmpty()) {
-        BoundingBox sceneBbox;
-        // 需要从CpuMesh获取bbox，暂时使用默认值
-        // 实际应该在加载时保存bbox信息
-        m_camera.fitToView(sceneBbox);
+        m_camera.fitToView(m_sceneBbox);
         update();
     }
 }
@@ -138,4 +136,14 @@ void RhiWidget::saveScreenshot(const QString& filePath) {
     } else {
         qDebug() << "Screenshot saved to" << filePath;
     }
+}
+
+void RhiWidget::toggleProjection() {
+    // 切换投影类型
+    static ProjectionType currentType = ProjectionType::Perspective;
+    currentType = (currentType == ProjectionType::Perspective) 
+                  ? ProjectionType::Orthographic 
+                  : ProjectionType::Perspective;
+    m_camera.setProjectionType(currentType);
+    update();
 }
