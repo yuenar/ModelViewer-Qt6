@@ -3,10 +3,12 @@
 #include "MaterialDialog.h"
 #include "LightDialog.h"
 #include <QFileDialog>
+#include <QColorDialog>
 #include <QMessageBox>
 #include <QMenuBar>
 #include <QVBoxLayout>
 #include <QWidget>
+#include <QDebug>
 
 MainWindow::MainWindow(QWidget* parent)
     : QMainWindow(parent)
@@ -225,11 +227,18 @@ void MainWindow::onScreenshot() {
 }
 
 void MainWindow::onBackgroundSettings() {
-    // 简单的背景颜色设置对话框
-    // 这里可以扩展为更复杂的对话框
-    QMessageBox::information(this, "Background Settings", 
-        "Background color settings can be configured through the renderer.\n"
-        "Currently using default gradient background.");
+    // 背景颜色设置对话框
+    QColor topColor = QColorDialog::getColor(QColor(51, 51, 77), this, "Select Top Background Color");
+    if (!topColor.isValid()) return;
+    
+    QColor botColor = QColorDialog::getColor(QColor(26, 26, 38), this, "Select Bottom Background Color");
+    if (!botColor.isValid()) return;
+    
+    QVector3D topVec(topColor.redF(), topColor.greenF(), topColor.blueF());
+    QVector3D botVec(botColor.redF(), botColor.greenF(), botColor.blueF());
+    
+    qDebug() << "Setting background colors: top=" << topVec << "bot=" << botVec;
+    m_rhiWidget->setBackgroundColors(topVec, botVec);
 }
 
 void MainWindow::onTogglePBR() {

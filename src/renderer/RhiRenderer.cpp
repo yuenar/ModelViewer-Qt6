@@ -1,6 +1,7 @@
 #include "RhiRenderer.h"
 #include "RhiMesh.h"
 #include <QFile>
+#include <QDebug>
 
 RhiRenderer::RhiRenderer(QRhi* rhi, QRhiRenderTarget* rt)
     : m_rhi(rhi), m_rt(rt)
@@ -8,6 +9,7 @@ RhiRenderer::RhiRenderer(QRhi* rhi, QRhiRenderTarget* rt)
 }
 
 RhiRenderer::~RhiRenderer() {
+    // 释放所有渲染管线和资源绑定
     delete m_pipeline;      delete m_srb;
     delete m_frameUBO;      delete m_materialUBO;
     delete m_wireframePipeline; delete m_wireframeSrb;
@@ -17,6 +19,12 @@ RhiRenderer::~RhiRenderer() {
     delete m_flatShadingPipeline; delete m_flatShadingSrb;
     delete m_bgPipeline;    delete m_bgSrb;
     delete m_bgUBO;         delete m_bgVBuf;
+    delete m_pbrPipeline;          delete m_pbrSrb;
+    delete m_shadowMappingPipeline; delete m_shadowMappingSrb;
+    delete m_skyboxPipeline;       delete m_skyboxSrb;
+    delete m_selectionPipeline;     delete m_selectionSrb;
+    delete m_clippingPlanePipeline; delete m_clippingPlaneSrb;
+    delete m_splitScreenPipeline;   delete m_splitScreenSrb;
 }
 
 QShader RhiRenderer::loadShader(const QString& qsbPath) {
@@ -76,7 +84,7 @@ void RhiRenderer::initialize(QRhiCommandBuffer* cb) {
         -1,  1,   1, -1,    1,  1,
     };
     auto* bgBatch = m_rhi->nextResourceUpdateBatch();
-    bgBatch->uploadStaticBuffer(m_bgVBuf, bgVerts);
+    bgBatch->uploadStaticBuffer(m_bgVBuf, 0, sizeof(bgVerts), bgVerts);
     cb->resourceUpdate(bgBatch);
 }
 
@@ -426,6 +434,7 @@ void RhiRenderer::render(QRhiCommandBuffer* cb,
     bgData.topColor[2] = m_bgTopColor.z(); bgData.topColor[3] = 1.0f;
     bgData.botColor[0] = m_bgBotColor.x(); bgData.botColor[1] = m_bgBotColor.y();
     bgData.botColor[2] = m_bgBotColor.z(); bgData.botColor[3] = 1.0f;
+    qDebug() << "Background UBO: top=" << m_bgTopColor << "bot=" << m_bgBotColor;
     updates->updateDynamicBuffer(m_bgUBO, 0, sizeof(BackgroundUBOData), &bgData);
     
     const QColor clearColor(30, 30, 30);
@@ -632,10 +641,8 @@ void RhiRenderer::releaseAndRebuildPipelines() {
     delete m_shadowMappingSrb;      m_shadowMappingSrb = nullptr;
     delete m_skyboxPipeline; m_skyboxPipeline = nullptr;
     delete m_skyboxSrb;      m_skyboxSrb = nullptr;
-    delete m_skyboxUBO;      m_skyboxUBO = nullptr;
     delete m_selectionPipeline; m_selectionPipeline = nullptr;
     delete m_selectionSrb;      m_selectionSrb = nullptr;
-    delete m_selectionUBO;      m_selectionUBO = nullptr;
     delete m_clippingPlanePipeline; m_clippingPlanePipeline = nullptr;
     delete m_clippingPlaneSrb;      m_clippingPlaneSrb = nullptr;
     delete m_splitScreenPipeline; m_splitScreenPipeline = nullptr;
@@ -716,6 +723,9 @@ void RhiRenderer::buildShadowMappingPipeline() {
         QRhiShaderResourceBinding::uniformBuffer(
             0, QRhiShaderResourceBinding::VertexStage | QRhiShaderResourceBinding::FragmentStage,
             m_frameUBO),
+        QRhiShaderResourceBinding::uniformBuffer(
+            1, QRhiShaderResourceBinding::FragmentStage,
+            m_materialUBO),
     });
     m_shadowMappingSrb->create();
     
@@ -734,11 +744,6 @@ void RhiRenderer::buildShadowMappingPipeline() {
 }
 
 void RhiRenderer::buildSkyboxPipeline() {
-    m_skyboxUBO = m_rhi->newBuffer(QRhiBuffer::Dynamic,
-                                    QRhiBuffer::UniformBuffer,
-                                    sizeof(float) * 4);
-    m_skyboxUBO->create();
-    
     QRhiVertexInputLayout inputLayout;
     inputLayout.setBindings({
         { sizeof(CpuMesh::Vertex) }
@@ -753,7 +758,10 @@ void RhiRenderer::buildSkyboxPipeline() {
     m_skyboxSrb->setBindings({
         QRhiShaderResourceBinding::uniformBuffer(
             0, QRhiShaderResourceBinding::VertexStage | QRhiShaderResourceBinding::FragmentStage,
-            m_skyboxUBO),
+            m_frameUBO),
+        QRhiShaderResourceBinding::uniformBuffer(
+            1, QRhiShaderResourceBinding::FragmentStage,
+            m_materialUBO),
     });
     m_skyboxSrb->create();
     
@@ -772,11 +780,6 @@ void RhiRenderer::buildSkyboxPipeline() {
 }
 
 void RhiRenderer::buildSelectionPipeline() {
-    m_selectionUBO = m_rhi->newBuffer(QRhiBuffer::Dynamic,
-                                       QRhiBuffer::UniformBuffer,
-                                       sizeof(float) * 4);
-    m_selectionUBO->create();
-    
     QRhiVertexInputLayout inputLayout;
     inputLayout.setBindings({
         { sizeof(CpuMesh::Vertex) }
@@ -791,7 +794,10 @@ void RhiRenderer::buildSelectionPipeline() {
     m_selectionSrb->setBindings({
         QRhiShaderResourceBinding::uniformBuffer(
             0, QRhiShaderResourceBinding::VertexStage | QRhiShaderResourceBinding::FragmentStage,
-            m_selectionUBO),
+            m_frameUBO),
+        QRhiShaderResourceBinding::uniformBuffer(
+            1, QRhiShaderResourceBinding::FragmentStage,
+            m_materialUBO),
     });
     m_selectionSrb->create();
     
@@ -825,6 +831,9 @@ void RhiRenderer::buildClippingPlanePipeline() {
         QRhiShaderResourceBinding::uniformBuffer(
             0, QRhiShaderResourceBinding::VertexStage | QRhiShaderResourceBinding::FragmentStage,
             m_frameUBO),
+        QRhiShaderResourceBinding::uniformBuffer(
+            1, QRhiShaderResourceBinding::FragmentStage,
+            m_materialUBO),
     });
     m_clippingPlaneSrb->create();
     
@@ -858,6 +867,9 @@ void RhiRenderer::buildSplitScreenPipeline() {
         QRhiShaderResourceBinding::uniformBuffer(
             0, QRhiShaderResourceBinding::VertexStage | QRhiShaderResourceBinding::FragmentStage,
             m_frameUBO),
+        QRhiShaderResourceBinding::uniformBuffer(
+            1, QRhiShaderResourceBinding::FragmentStage,
+            m_materialUBO),
     });
     m_splitScreenSrb->create();
     
