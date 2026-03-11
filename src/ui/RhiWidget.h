@@ -20,6 +20,7 @@ public:
     Material getMaterial() const { return m_material; }
     void setLight(const Light& light);
     Light getLight() const { return m_light; }
+    void setBackgroundColors(const QVector3D& topColor, const QVector3D& botColor);
     void fitToView();
     void saveScreenshot(const QString& filePath);
     void toggleProjection();

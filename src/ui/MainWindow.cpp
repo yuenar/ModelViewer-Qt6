@@ -49,9 +49,21 @@ void MainWindow::setupMenus() {
     m_actionWireframe->setCheckable(true);
     connect(m_actionWireframe, &QAction::toggled, this, &MainWindow::onToggleWireframe);
     
-    m_actionNormals = viewMenu->addAction("&Normals");
+    m_actionNormals = viewMenu->addAction("&Vertex Normals");
     m_actionNormals->setCheckable(true);
     connect(m_actionNormals, &QAction::toggled, this, &MainWindow::onToggleNormals);
+    
+    m_actionFaceNormals = viewMenu->addAction("&Face Normals");
+    m_actionFaceNormals->setCheckable(true);
+    connect(m_actionFaceNormals, &QAction::toggled, this, &MainWindow::onToggleFaceNormals);
+    
+    m_actionVertexNormals = viewMenu->addAction("&Vertex Normals Visualization");
+    m_actionVertexNormals->setCheckable(true);
+    connect(m_actionVertexNormals, &QAction::toggled, this, &MainWindow::onToggleVertexNormals);
+    
+    m_actionFlatShading = viewMenu->addAction("&Flat Shading");
+    m_actionFlatShading->setCheckable(true);
+    connect(m_actionFlatShading, &QAction::toggled, this, &MainWindow::onToggleFlatShading);
     
     viewMenu->addSeparator();
     
@@ -66,6 +78,9 @@ void MainWindow::setupMenus() {
     
     auto* lightAction = toolsMenu->addAction("&Light Settings...");
     connect(lightAction, &QAction::triggered, this, &MainWindow::onLightSettings);
+    
+    auto* bgAction = toolsMenu->addAction("&Background Settings...");
+    connect(bgAction, &QAction::triggered, this, &MainWindow::onBackgroundSettings);
     
     toolsMenu->addSeparator();
     
@@ -107,7 +122,46 @@ void MainWindow::onToggleWireframe() {
 void MainWindow::onToggleNormals() {
     if (m_actionNormals->isChecked()) {
         m_actionWireframe->setChecked(false);
+        m_actionFaceNormals->setChecked(false);
+        m_actionVertexNormals->setChecked(false);
+        m_actionFlatShading->setChecked(false);
         m_rhiWidget->setRenderMode(2);
+    } else {
+        m_rhiWidget->setRenderMode(0);
+    }
+}
+
+void MainWindow::onToggleFaceNormals() {
+    if (m_actionFaceNormals->isChecked()) {
+        m_actionWireframe->setChecked(false);
+        m_actionNormals->setChecked(false);
+        m_actionVertexNormals->setChecked(false);
+        m_actionFlatShading->setChecked(false);
+        m_rhiWidget->setRenderMode(3);
+    } else {
+        m_rhiWidget->setRenderMode(0);
+    }
+}
+
+void MainWindow::onToggleVertexNormals() {
+    if (m_actionVertexNormals->isChecked()) {
+        m_actionWireframe->setChecked(false);
+        m_actionNormals->setChecked(false);
+        m_actionFaceNormals->setChecked(false);
+        m_actionFlatShading->setChecked(false);
+        m_rhiWidget->setRenderMode(4);
+    } else {
+        m_rhiWidget->setRenderMode(0);
+    }
+}
+
+void MainWindow::onToggleFlatShading() {
+    if (m_actionFlatShading->isChecked()) {
+        m_actionWireframe->setChecked(false);
+        m_actionNormals->setChecked(false);
+        m_actionFaceNormals->setChecked(false);
+        m_actionVertexNormals->setChecked(false);
+        m_rhiWidget->setRenderMode(5);
     } else {
         m_rhiWidget->setRenderMode(0);
     }
@@ -142,4 +196,12 @@ void MainWindow::onScreenshot() {
     if (!path.isEmpty()) {
         m_rhiWidget->saveScreenshot(path);
     }
+}
+
+void MainWindow::onBackgroundSettings() {
+    // 简单的背景颜色设置对话框
+    // 这里可以扩展为更复杂的对话框
+    QMessageBox::information(this, "Background Settings", 
+        "Background color settings can be configured through the renderer.\n"
+        "Currently using default gradient background.");
 }

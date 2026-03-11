@@ -90,6 +90,13 @@ void RhiWidget::setLight(const Light& light) {
     update();
 }
 
+void RhiWidget::setBackgroundColors(const QVector3D& topColor, const QVector3D& botColor) {
+    if (m_renderer) {
+        m_renderer->setBackgroundColors(topColor, botColor);
+        update();
+    }
+}
+
 void RhiWidget::fitToView() {
     if (!m_meshes.isEmpty()) {
         m_camera.fitToView(m_sceneBbox);

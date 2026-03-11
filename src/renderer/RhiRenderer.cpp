@@ -12,6 +12,9 @@ RhiRenderer::~RhiRenderer() {
     delete m_frameUBO;      delete m_materialUBO;
     delete m_wireframePipeline; delete m_wireframeSrb;
     delete m_normalsPipeline;  delete m_normalsSrb;  delete m_normalsUBO;
+    delete m_faceNormalsPipeline; delete m_faceNormalsSrb; delete m_faceNormalsUBO;
+    delete m_vertexNormalsPipeline; delete m_vertexNormalsSrb; delete m_vertexNormalsUBO;
+    delete m_flatShadingPipeline; delete m_flatShadingSrb;
     delete m_bgPipeline;    delete m_bgSrb;
     delete m_bgUBO;         delete m_bgVBuf;
 }
@@ -34,9 +37,37 @@ void RhiRenderer::initialize(QRhiCommandBuffer* cb) {
                                       sizeof(MaterialUBOData));
     m_materialUBO->create();
     
+    m_bgUBO = m_rhi->newBuffer(QRhiBuffer::Dynamic,
+                                QRhiBuffer::UniformBuffer,
+                                sizeof(BackgroundUBOData));
+    m_bgUBO->create();
+    
+    m_bgVBuf = m_rhi->newBuffer(QRhiBuffer::Immutable,
+                                 QRhiBuffer::VertexBuffer,
+                                 sizeof(float) * 12);
+    m_bgVBuf->create();
+    
+    m_normalsUBO = m_rhi->newBuffer(QRhiBuffer::Dynamic,
+                                     QRhiBuffer::UniformBuffer,
+                                     sizeof(float));
+    m_normalsUBO->create();
+    
+    m_faceNormalsUBO = m_rhi->newBuffer(QRhiBuffer::Dynamic,
+                                         QRhiBuffer::UniformBuffer,
+                                         sizeof(float));
+    m_faceNormalsUBO->create();
+    
+    m_vertexNormalsUBO = m_rhi->newBuffer(QRhiBuffer::Dynamic,
+                                           QRhiBuffer::UniformBuffer,
+                                           sizeof(float));
+    m_vertexNormalsUBO->create();
+    
     buildPipeline();
     buildWireframePipeline();
     buildNormalsPipeline();
+    buildFaceNormalsPipeline();
+    buildVertexNormalsPipeline();
+    buildFlatShadingPipeline();
     buildBackgroundPipeline();
     
     // 上传背景顶点数据
@@ -225,6 +256,120 @@ void RhiRenderer::buildBackgroundPipeline() {
     m_bgPipeline->create();
 }
 
+void RhiRenderer::buildFaceNormalsPipeline() {
+    QRhiVertexInputLayout inputLayout;
+    inputLayout.setBindings({
+        { sizeof(CpuMesh::Vertex) }
+    });
+    inputLayout.setAttributes({
+        { 0, 0, QRhiVertexInputAttribute::Float3, 0 },
+        { 0, 1, QRhiVertexInputAttribute::Float3, 12 },
+        { 0, 2, QRhiVertexInputAttribute::Float2, 24 },
+    });
+    
+    m_faceNormalsSrb = m_rhi->newShaderResourceBindings();
+    m_faceNormalsSrb->setBindings({
+        QRhiShaderResourceBinding::uniformBuffer(
+            0, QRhiShaderResourceBinding::VertexStage | QRhiShaderResourceBinding::FragmentStage,
+            m_frameUBO),
+        QRhiShaderResourceBinding::uniformBuffer(
+            2, QRhiShaderResourceBinding::GeometryStage,
+            m_faceNormalsUBO),
+    });
+    m_faceNormalsSrb->create();
+    
+    m_faceNormalsPipeline = m_rhi->newGraphicsPipeline();
+    m_faceNormalsPipeline->setShaderStages({
+        { QRhiShaderStage::Vertex,   loadShader(":/shaders/face_normal.vert.qsb") },
+        { QRhiShaderStage::Fragment, loadShader(":/shaders/face_normal.frag.qsb") },
+    });
+    m_faceNormalsPipeline->setVertexInputLayout(inputLayout);
+    m_faceNormalsPipeline->setShaderResourceBindings(m_faceNormalsSrb);
+    m_faceNormalsPipeline->setRenderPassDescriptor(m_rt->renderPassDescriptor());
+    
+    m_faceNormalsPipeline->setDepthTest(true);
+    m_faceNormalsPipeline->setDepthWrite(true);
+    m_faceNormalsPipeline->setTopology(QRhiGraphicsPipeline::Triangles);
+    m_faceNormalsPipeline->create();
+}
+
+void RhiRenderer::buildVertexNormalsPipeline() {
+    QRhiVertexInputLayout inputLayout;
+    inputLayout.setBindings({
+        { sizeof(CpuMesh::Vertex) }
+    });
+    inputLayout.setAttributes({
+        { 0, 0, QRhiVertexInputAttribute::Float3, 0 },
+        { 0, 1, QRhiVertexInputAttribute::Float3, 12 },
+        { 0, 2, QRhiVertexInputAttribute::Float2, 24 },
+    });
+    
+    m_vertexNormalsSrb = m_rhi->newShaderResourceBindings();
+    m_vertexNormalsSrb->setBindings({
+        QRhiShaderResourceBinding::uniformBuffer(
+            0, QRhiShaderResourceBinding::VertexStage | QRhiShaderResourceBinding::FragmentStage,
+            m_frameUBO),
+        QRhiShaderResourceBinding::uniformBuffer(
+            2, QRhiShaderResourceBinding::GeometryStage,
+            m_vertexNormalsUBO),
+    });
+    m_vertexNormalsSrb->create();
+    
+    m_vertexNormalsPipeline = m_rhi->newGraphicsPipeline();
+    m_vertexNormalsPipeline->setShaderStages({
+        { QRhiShaderStage::Vertex,   loadShader(":/shaders/vertex_normal.vert.qsb") },
+        { QRhiShaderStage::Fragment, loadShader(":/shaders/vertex_normal.frag.qsb") },
+    });
+    m_vertexNormalsPipeline->setVertexInputLayout(inputLayout);
+    m_vertexNormalsPipeline->setShaderResourceBindings(m_vertexNormalsSrb);
+    m_vertexNormalsPipeline->setRenderPassDescriptor(m_rt->renderPassDescriptor());
+    
+    m_vertexNormalsPipeline->setDepthTest(true);
+    m_vertexNormalsPipeline->setDepthWrite(true);
+    m_vertexNormalsPipeline->setTopology(QRhiGraphicsPipeline::Triangles);
+    m_vertexNormalsPipeline->create();
+}
+
+void RhiRenderer::buildFlatShadingPipeline() {
+    QRhiVertexInputLayout inputLayout;
+    inputLayout.setBindings({
+        { sizeof(CpuMesh::Vertex) }
+    });
+    inputLayout.setAttributes({
+        { 0, 0, QRhiVertexInputAttribute::Float3, 0 },
+        { 0, 1, QRhiVertexInputAttribute::Float3, 12 },
+        { 0, 2, QRhiVertexInputAttribute::Float2, 24 },
+    });
+    
+    m_flatShadingSrb = m_rhi->newShaderResourceBindings();
+    m_flatShadingSrb->setBindings({
+        QRhiShaderResourceBinding::uniformBuffer(
+            0, QRhiShaderResourceBinding::VertexStage | QRhiShaderResourceBinding::FragmentStage,
+            m_frameUBO),
+        QRhiShaderResourceBinding::uniformBuffer(
+            1, QRhiShaderResourceBinding::FragmentStage,
+            m_materialUBO),
+    });
+    m_flatShadingSrb->create();
+    
+    m_flatShadingPipeline = m_rhi->newGraphicsPipeline();
+    m_flatShadingPipeline->setShaderStages({
+        { QRhiShaderStage::Vertex,   loadShader(":/shaders/phong.vert.qsb") },
+        { QRhiShaderStage::Fragment, loadShader(":/shaders/phong.frag.qsb") },
+    });
+    m_flatShadingPipeline->setVertexInputLayout(inputLayout);
+    m_flatShadingPipeline->setShaderResourceBindings(m_flatShadingSrb);
+    m_flatShadingPipeline->setRenderPassDescriptor(m_rt->renderPassDescriptor());
+    
+    m_flatShadingPipeline->setDepthTest(true);
+    m_flatShadingPipeline->setDepthWrite(true);
+    m_flatShadingPipeline->setDepthOp(QRhiGraphicsPipeline::Less);
+    m_flatShadingPipeline->setCullMode(QRhiGraphicsPipeline::Back);
+    m_flatShadingPipeline->setFrontFace(QRhiGraphicsPipeline::CCW);
+    m_flatShadingPipeline->setTopology(QRhiGraphicsPipeline::Triangles);
+    m_flatShadingPipeline->create();
+}
+
 void RhiRenderer::render(QRhiCommandBuffer* cb,
                           const QVector<RhiMesh*>& meshes,
                           const Camera& cam,
@@ -273,10 +418,24 @@ void RhiRenderer::render(QRhiCommandBuffer* cb,
     updates->updateDynamicBuffer(m_materialUBO, 0, sizeof(MaterialUBOData), &matData);
     
     // 为normals模式添加normalLength更新
-    if (m_renderMode == 2) {
+    if (m_renderMode == 2 || m_renderMode == 3 || m_renderMode == 4) {
         float normalLength = 0.1f;
-        updates->updateDynamicBuffer(m_normalsUBO, 0, sizeof(float), &normalLength);
+        if (m_renderMode == 2) {
+            updates->updateDynamicBuffer(m_normalsUBO, 0, sizeof(float), &normalLength);
+        } else if (m_renderMode == 3) {
+            updates->updateDynamicBuffer(m_faceNormalsUBO, 0, sizeof(float), &normalLength);
+        } else if (m_renderMode == 4) {
+            updates->updateDynamicBuffer(m_vertexNormalsUBO, 0, sizeof(float), &normalLength);
+        }
     }
+    
+    // 更新背景颜色
+    BackgroundUBOData bgData;
+    bgData.topColor[0] = m_bgTopColor.x(); bgData.topColor[1] = m_bgTopColor.y();
+    bgData.topColor[2] = m_bgTopColor.z(); bgData.topColor[3] = 1.0f;
+    bgData.botColor[0] = m_bgBotColor.x(); bgData.botColor[1] = m_bgBotColor.y();
+    bgData.botColor[2] = m_bgBotColor.z(); bgData.botColor[3] = 1.0f;
+    updates->updateDynamicBuffer(m_bgUBO, 0, sizeof(BackgroundUBOData), &bgData);
     
     const QColor clearColor(30, 30, 30);
     const QRhiDepthStencilClearValue dsv(1.0f, 0);
@@ -321,9 +480,45 @@ void RhiRenderer::render(QRhiCommandBuffer* cb,
             cb->drawIndexed(mesh->indexCount());
         }
     } else if (m_renderMode == 2) {
-        // Normals 模式
+        // Vertex Normals 模式
         cb->setGraphicsPipeline(m_normalsPipeline);
         cb->setShaderResources(m_normalsSrb);
+        
+        for (RhiMesh* mesh : meshes) {
+            const QRhiCommandBuffer::VertexInput vbufBind(mesh->vertexBuffer(), 0);
+            cb->setVertexInput(0, 1, &vbufBind,
+                               mesh->indexBuffer(),
+                               0, QRhiCommandBuffer::IndexUInt32);
+            cb->drawIndexed(mesh->indexCount());
+        }
+    } else if (m_renderMode == 3) {
+        // Face Normals 模式
+        cb->setGraphicsPipeline(m_faceNormalsPipeline);
+        cb->setShaderResources(m_faceNormalsSrb);
+        
+        for (RhiMesh* mesh : meshes) {
+            const QRhiCommandBuffer::VertexInput vbufBind(mesh->vertexBuffer(), 0);
+            cb->setVertexInput(0, 1, &vbufBind,
+                               mesh->indexBuffer(),
+                               0, QRhiCommandBuffer::IndexUInt32);
+            cb->drawIndexed(mesh->indexCount());
+        }
+    } else if (m_renderMode == 4) {
+        // Vertex Normals 可视化模式
+        cb->setGraphicsPipeline(m_vertexNormalsPipeline);
+        cb->setShaderResources(m_vertexNormalsSrb);
+        
+        for (RhiMesh* mesh : meshes) {
+            const QRhiCommandBuffer::VertexInput vbufBind(mesh->vertexBuffer(), 0);
+            cb->setVertexInput(0, 1, &vbufBind,
+                               mesh->indexBuffer(),
+                               0, QRhiCommandBuffer::IndexUInt32);
+            cb->drawIndexed(mesh->indexCount());
+        }
+    } else if (m_renderMode == 5) {
+        // Flat Shading 模式
+        cb->setGraphicsPipeline(m_flatShadingPipeline);
+        cb->setShaderResources(m_flatShadingSrb);
         
         for (RhiMesh* mesh : meshes) {
             const QRhiCommandBuffer::VertexInput vbufBind(mesh->vertexBuffer(), 0);
@@ -348,14 +543,28 @@ void RhiRenderer::releaseAndRebuildPipelines() {
     delete m_wireframeSrb;       m_wireframeSrb = nullptr;
     delete m_normalsPipeline;    m_normalsPipeline = nullptr;
     delete m_normalsSrb;         m_normalsSrb = nullptr;
+    delete m_faceNormalsPipeline; m_faceNormalsPipeline = nullptr;
+    delete m_faceNormalsSrb;      m_faceNormalsSrb = nullptr;
+    delete m_vertexNormalsPipeline; m_vertexNormalsPipeline = nullptr;
+    delete m_vertexNormalsSrb;      m_vertexNormalsSrb = nullptr;
+    delete m_flatShadingPipeline; m_flatShadingPipeline = nullptr;
+    delete m_flatShadingSrb;      m_flatShadingSrb = nullptr;
     delete m_bgPipeline; m_bgPipeline = nullptr;
     delete m_bgSrb;     m_bgSrb     = nullptr;
     buildPipeline();
     buildWireframePipeline();
     buildNormalsPipeline();
+    buildFaceNormalsPipeline();
+    buildVertexNormalsPipeline();
+    buildFlatShadingPipeline();
     buildBackgroundPipeline();
 }
 
 void RhiRenderer::setRenderMode(int mode) {
     m_renderMode = mode;
+}
+
+void RhiRenderer::setBackgroundColors(const QVector3D& topColor, const QVector3D& botColor) {
+    m_bgTopColor = topColor;
+    m_bgBotColor = botColor;
 }
