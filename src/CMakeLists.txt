@@ -98,8 +98,8 @@ qt_add_shaders(ModelViewer "shaders"
         shaders/splitScreen.frag
         shaders/text.vert
         shaders/text.frag
-        shaders/twoside_per_fragment.vert
-        shaders/twoside_per_fragment.frag
+        shaders/brdf.vert
+        shaders/brdf.frag
 )
 
 target_link_libraries(ModelViewer PRIVATE

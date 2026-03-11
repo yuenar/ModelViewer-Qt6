@@ -67,6 +67,32 @@ void MainWindow::setupMenus() {
     
     viewMenu->addSeparator();
     
+    m_actionPBR = viewMenu->addAction("&PBR Rendering");
+    m_actionPBR->setCheckable(true);
+    connect(m_actionPBR, &QAction::toggled, this, &MainWindow::onTogglePBR);
+    
+    m_actionShadowMapping = viewMenu->addAction("&Shadow Mapping");
+    m_actionShadowMapping->setCheckable(true);
+    connect(m_actionShadowMapping, &QAction::toggled, this, &MainWindow::onToggleShadowMapping);
+    
+    m_actionSkybox = viewMenu->addAction("&Skybox");
+    m_actionSkybox->setCheckable(true);
+    connect(m_actionSkybox, &QAction::toggled, this, &MainWindow::onToggleSkybox);
+    
+    m_actionSelection = viewMenu->addAction("&Selection Mode");
+    m_actionSelection->setCheckable(true);
+    connect(m_actionSelection, &QAction::toggled, this, &MainWindow::onToggleSelection);
+    
+    m_actionClippingPlane = viewMenu->addAction("&Clipping Plane");
+    m_actionClippingPlane->setCheckable(true);
+    connect(m_actionClippingPlane, &QAction::toggled, this, &MainWindow::onToggleClippingPlane);
+    
+    m_actionSplitScreen = viewMenu->addAction("&Split Screen");
+    m_actionSplitScreen->setCheckable(true);
+    connect(m_actionSplitScreen, &QAction::toggled, this, &MainWindow::onToggleSplitScreen);
+    
+    viewMenu->addSeparator();
+    
     m_actionOrtho = viewMenu->addAction("&Orthographic Projection");
     m_actionOrtho->setCheckable(true);
     connect(m_actionOrtho, &QAction::toggled, this, &MainWindow::onToggleProjection);
@@ -204,4 +230,112 @@ void MainWindow::onBackgroundSettings() {
     QMessageBox::information(this, "Background Settings", 
         "Background color settings can be configured through the renderer.\n"
         "Currently using default gradient background.");
+}
+
+void MainWindow::onTogglePBR() {
+    if (m_actionPBR->isChecked()) {
+        m_actionWireframe->setChecked(false);
+        m_actionNormals->setChecked(false);
+        m_actionFaceNormals->setChecked(false);
+        m_actionVertexNormals->setChecked(false);
+        m_actionFlatShading->setChecked(false);
+        m_actionShadowMapping->setChecked(false);
+        m_actionSkybox->setChecked(false);
+        m_actionSelection->setChecked(false);
+        m_actionClippingPlane->setChecked(false);
+        m_actionSplitScreen->setChecked(false);
+        m_rhiWidget->setRenderMode(6);
+    } else {
+        m_rhiWidget->setRenderMode(0);
+    }
+}
+
+void MainWindow::onToggleShadowMapping() {
+    if (m_actionShadowMapping->isChecked()) {
+        m_actionWireframe->setChecked(false);
+        m_actionNormals->setChecked(false);
+        m_actionFaceNormals->setChecked(false);
+        m_actionVertexNormals->setChecked(false);
+        m_actionFlatShading->setChecked(false);
+        m_actionPBR->setChecked(false);
+        m_actionSkybox->setChecked(false);
+        m_actionSelection->setChecked(false);
+        m_actionClippingPlane->setChecked(false);
+        m_actionSplitScreen->setChecked(false);
+        m_rhiWidget->setRenderMode(7);
+    } else {
+        m_rhiWidget->setRenderMode(0);
+    }
+}
+
+void MainWindow::onToggleSkybox() {
+    if (m_actionSkybox->isChecked()) {
+        m_actionWireframe->setChecked(false);
+        m_actionNormals->setChecked(false);
+        m_actionFaceNormals->setChecked(false);
+        m_actionVertexNormals->setChecked(false);
+        m_actionFlatShading->setChecked(false);
+        m_actionPBR->setChecked(false);
+        m_actionShadowMapping->setChecked(false);
+        m_actionSelection->setChecked(false);
+        m_actionClippingPlane->setChecked(false);
+        m_actionSplitScreen->setChecked(false);
+        m_rhiWidget->setRenderMode(8);
+    } else {
+        m_rhiWidget->setRenderMode(0);
+    }
+}
+
+void MainWindow::onToggleSelection() {
+    if (m_actionSelection->isChecked()) {
+        m_actionWireframe->setChecked(false);
+        m_actionNormals->setChecked(false);
+        m_actionFaceNormals->setChecked(false);
+        m_actionVertexNormals->setChecked(false);
+        m_actionFlatShading->setChecked(false);
+        m_actionPBR->setChecked(false);
+        m_actionShadowMapping->setChecked(false);
+        m_actionSkybox->setChecked(false);
+        m_actionClippingPlane->setChecked(false);
+        m_actionSplitScreen->setChecked(false);
+        m_rhiWidget->setRenderMode(9);
+    } else {
+        m_rhiWidget->setRenderMode(0);
+    }
+}
+
+void MainWindow::onToggleClippingPlane() {
+    if (m_actionClippingPlane->isChecked()) {
+        m_actionWireframe->setChecked(false);
+        m_actionNormals->setChecked(false);
+        m_actionFaceNormals->setChecked(false);
+        m_actionVertexNormals->setChecked(false);
+        m_actionFlatShading->setChecked(false);
+        m_actionPBR->setChecked(false);
+        m_actionShadowMapping->setChecked(false);
+        m_actionSkybox->setChecked(false);
+        m_actionSelection->setChecked(false);
+        m_actionSplitScreen->setChecked(false);
+        m_rhiWidget->setRenderMode(10);
+    } else {
+        m_rhiWidget->setRenderMode(0);
+    }
+}
+
+void MainWindow::onToggleSplitScreen() {
+    if (m_actionSplitScreen->isChecked()) {
+        m_actionWireframe->setChecked(false);
+        m_actionNormals->setChecked(false);
+        m_actionFaceNormals->setChecked(false);
+        m_actionVertexNormals->setChecked(false);
+        m_actionFlatShading->setChecked(false);
+        m_actionPBR->setChecked(false);
+        m_actionShadowMapping->setChecked(false);
+        m_actionSkybox->setChecked(false);
+        m_actionSelection->setChecked(false);
+        m_actionClippingPlane->setChecked(false);
+        m_rhiWidget->setRenderMode(11);
+    } else {
+        m_rhiWidget->setRenderMode(0);
+    }
 }

@@ -19,6 +19,12 @@ private slots:
     void onToggleFaceNormals();
     void onToggleVertexNormals();
     void onToggleFlatShading();
+    void onTogglePBR();
+    void onToggleShadowMapping();
+    void onToggleSkybox();
+    void onToggleSelection();
+    void onToggleClippingPlane();
+    void onToggleSplitScreen();
     void onToggleProjection();
     void onMaterialSettings();
     void onLightSettings();
@@ -36,5 +42,11 @@ private:
     QAction* m_actionFaceNormals = nullptr;
     QAction* m_actionVertexNormals = nullptr;
     QAction* m_actionFlatShading = nullptr;
+    QAction* m_actionPBR = nullptr;
+    QAction* m_actionShadowMapping = nullptr;
+    QAction* m_actionSkybox = nullptr;
+    QAction* m_actionSelection = nullptr;
+    QAction* m_actionClippingPlane = nullptr;
+    QAction* m_actionSplitScreen = nullptr;
     QAction* m_actionOrtho = nullptr;
 };
