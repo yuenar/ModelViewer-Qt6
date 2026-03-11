@@ -77,6 +77,8 @@ qt_add_shaders(ModelViewer "shaders"
         shaders/face_normal.frag
         shaders/vertex_normal.vert
         shaders/vertex_normal.frag
+        shaders/axis.vert
+        shaders/axis.frag
         shaders/clipped_mesh.vert
         shaders/clipped_mesh.frag
         shaders/clipping_plane.vert
@@ -84,6 +86,8 @@ qt_add_shaders(ModelViewer "shaders"
         shaders/debug_quad.vert
         shaders/debug_quad_depth.frag
         shaders/light_cube.vert
+        shaders/light_cube.frag
+        shaders/irradiance_convolution.frag
         shaders/selection.vert
         shaders/selection.frag
         shaders/shadow_mapping_depth.vert
@@ -95,6 +99,7 @@ qt_add_shaders(ModelViewer "shaders"
         shaders/text.vert
         shaders/text.frag
         shaders/twoside_per_fragment.vert
+        shaders/twoside_per_fragment.frag
 )
 
 target_link_libraries(ModelViewer PRIVATE

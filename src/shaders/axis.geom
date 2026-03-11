@@ -29,7 +29,7 @@ layout(location = 7) out float g_clipDist;
 
 void main()
 {	
-    for(int i=0; i<gl_in.length(); i++)
+    for(int i=0; i<2; i++)
     {
         g_normal = v_normal[i];
         g_texCoord2d = v_texCoord2d[i];
@@ -40,11 +40,6 @@ void main()
         g_clipDistY = clipDistY[i];
         g_clipDistZ = clipDistZ[i];
         g_clipDist = clipDist[i];
-
-        gl_ClipDistance[0] = g_clipDistX;
-        gl_ClipDistance[1] = g_clipDistY;
-        gl_ClipDistance[2] = g_clipDistZ;
-        gl_ClipDistance[3] = g_clipDist;
 
         EmitVertex();
     }

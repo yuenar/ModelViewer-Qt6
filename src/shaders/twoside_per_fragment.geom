@@ -15,7 +15,7 @@ layout(location = 2) out vec2 g_texCoord2d;
 layout(location = 3) out vec3 g_tangent;
 layout(location = 4) out vec3 g_bitangent;
 
-noperspective layout(location = 5) out vec3 g_edgeDistance;
+layout(location = 5) out vec3 g_edgeDistance;
 
 layout(std140, binding = 0) uniform TwoSideGeomUBO {
     mat4 viewportMatrix;
@@ -25,23 +25,19 @@ layout(std140, binding = 0) uniform TwoSideGeomUBO {
     float _p2;
 };
 
-layout(location = 6) in VS_OUT_SHADOW {
-    layout(location = 6) vec3 FragPos;
-    layout(location = 7) vec3 Normal;
-    layout(location = 8) vec2 TexCoords;
-    layout(location = 9) vec4 FragPosLightSpace;
-    layout(location = 10) vec3 cameraPos;
-    layout(location = 11) vec3 lightPos;
-} gs_in_shadow[];
+layout(location = 6) in vec3 v_FragPos[];
+layout(location = 7) in vec3 v_Normal[];
+layout(location = 8) in vec2 v_TexCoords[];
+layout(location = 9) in vec4 v_FragPosLightSpace[];
+layout(location = 10) in vec3 v_cameraPos[];
+layout(location = 11) in vec3 v_lightPos[];
 
-out GS_OUT_SHADOW {
-    layout(location = 6) vec3 FragPos;
-    layout(location = 7) vec3 Normal;
-    layout(location = 8) vec2 TexCoords;
-    layout(location = 9) vec4 FragPosLightSpace;
-    layout(location = 10) vec3 cameraPos;
-    layout(location = 11) vec3 lightPos;
-} gs_out_shadow;
+layout(location = 6) out vec3 g_FragPos;
+layout(location = 7) out vec3 g_Normal;
+layout(location = 8) out vec2 g_TexCoords;
+layout(location = 9) out vec4 g_FragPosLightSpace;
+layout(location = 10) out vec3 g_cameraPos;
+layout(location = 11) out vec3 g_lightPos;
 
 layout(location = 12) in vec3  v_reflectionPosition[];
 layout(location = 12) out vec3 g_reflectionPosition;
@@ -70,12 +66,12 @@ void main()
 {
     // initialize to remove warning
     g_edgeDistance = vec3(0);
-    gs_out_shadow.FragPos = vec3(0);
-    gs_out_shadow.Normal = vec3(0);
-    gs_out_shadow.TexCoords = vec2(0);
-    gs_out_shadow.FragPosLightSpace = vec4(0);
-    gs_out_shadow.cameraPos = vec3(0);
-    gs_out_shadow.lightPos = vec3(0);
+    g_FragPos = vec3(0);
+    g_Normal = vec3(0);
+    g_TexCoords = vec2(0);
+    g_FragPosLightSpace = vec4(0);
+    g_cameraPos = vec3(0);
+    g_lightPos = vec3(0);
     g_reflectionPosition = vec3(0);
     g_reflectionNormal = vec3(0);
     g_tangentLightPos = vec3(0);
@@ -114,11 +110,6 @@ void main()
         g_clipDistY = v_clipDistY[0];
         g_clipDistZ = v_clipDistZ[0];
         g_clipDist =  v_clipDist[0];
-
-        gl_ClipDistance[0] = g_clipDistX;
-        gl_ClipDistance[1] = g_clipDistY;
-        gl_ClipDistance[2] = g_clipDistZ;
-        gl_ClipDistance[3] = g_clipDist;
         EmitVertex();
 
         g_edgeDistance = vec3( 0, hb, 0 );
@@ -130,11 +121,6 @@ void main()
         g_clipDistY = v_clipDistY[1];
         g_clipDistZ = v_clipDistZ[1];
         g_clipDist =  v_clipDist[1];
-
-        gl_ClipDistance[0] = g_clipDistX;
-        gl_ClipDistance[1] = g_clipDistY;
-        gl_ClipDistance[2] = g_clipDistZ;
-        gl_ClipDistance[3] = g_clipDist;
         EmitVertex();
 
         g_edgeDistance = vec3( 0, 0, hc );
@@ -146,18 +132,13 @@ void main()
         g_clipDistY = v_clipDistY[2];
         g_clipDistZ = v_clipDistZ[2];
         g_clipDist =  v_clipDist[2];
-
-        gl_ClipDistance[0] = g_clipDistX;
-        gl_ClipDistance[1] = g_clipDistY;
-        gl_ClipDistance[2] = g_clipDistZ;
-        gl_ClipDistance[3] = g_clipDist;
         EmitVertex();
 
         EndPrimitive();
     }
     else
     {
-        for(int i=0; i<gl_in.length(); i++)
+        for(int i=0; i<3; i++)
         {
             g_normal = v_normal[i];
             g_texCoord2d = v_texCoord2d[i];
@@ -169,18 +150,13 @@ void main()
             g_clipDistZ = v_clipDistZ[i];
             g_clipDist =  v_clipDist[i];
 
-            gl_ClipDistance[0] = g_clipDistX;
-            gl_ClipDistance[1] = g_clipDistY;
-            gl_ClipDistance[2] = g_clipDistZ;
-            gl_ClipDistance[3] = g_clipDist;
-
             // Shadow mapping
-            gs_out_shadow.FragPos = gs_in_shadow[i].FragPos;
-            gs_out_shadow.Normal = gs_in_shadow[i].Normal;
-            gs_out_shadow.TexCoords = gs_in_shadow[i].TexCoords;
-            gs_out_shadow.FragPosLightSpace = gs_in_shadow[i].FragPosLightSpace;
-            gs_out_shadow.cameraPos = gs_in_shadow[i].cameraPos;
-            gs_out_shadow.lightPos = gs_in_shadow[i].lightPos;
+            g_FragPos = v_FragPos[i];
+            g_Normal = v_Normal[i];
+            g_TexCoords = v_TexCoords[i];
+            g_FragPosLightSpace = v_FragPosLightSpace[i];
+            g_cameraPos = v_cameraPos[i];
+            g_lightPos = v_lightPos[i];
 
             // Cube environment mapping
             g_reflectionPosition = v_reflectionPosition[i];

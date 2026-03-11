@@ -5,21 +5,18 @@ layout(location = 1) in vec3 g_normal;
 layout(location = 2) in vec2 g_texCoord2d;
 layout(location = 3) in vec3 g_tangent;
 layout(location = 4) in vec3 g_bitangent;
-noperspective layout(location = 5) in vec3 g_edgeDistance;
-layout(location = 6) in vec3 g_reflectionPosition;
-layout(location = 7) in vec3 g_reflectionNormal;
-layout(location = 8) in vec3 g_tangentLightPos;
-layout(location = 9) in vec3 g_tangentViewPos;
-layout(location = 10) in vec3 g_tangentFragPos;
-
-in GS_OUT_SHADOW {
-    layout(location = 11) vec3 FragPos;
-    layout(location = 12) vec3 Normal;
-    layout(location = 13) vec2 TexCoords;
-    layout(location = 14) vec4 FragPosLightSpace;
-    layout(location = 15) vec3 cameraPos;
-    layout(location = 16) vec3 lightPos;
-} fs_in_shadow;
+layout(location = 5) in vec3 g_edgeDistance;
+layout(location = 6) in vec3 g_FragPos;
+layout(location = 7) in vec3 g_Normal;
+layout(location = 8) in vec2 g_TexCoords;
+layout(location = 9) in vec4 g_FragPosLightSpace;
+layout(location = 10) in vec3 g_cameraPos;
+layout(location = 11) in vec3 g_lightPos;
+layout(location = 12) in vec3 g_reflectionPosition;
+layout(location = 13) in vec3 g_reflectionNormal;
+layout(location = 14) in vec3 g_tangentLightPos;
+layout(location = 15) in vec3 g_tangentViewPos;
+layout(location = 16) in vec3 g_tangentFragPos;
 
 layout(std140, binding = 0) uniform TwoSideFragUBO {
     float opacity;
