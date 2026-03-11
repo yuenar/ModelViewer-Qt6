@@ -13,7 +13,14 @@ RhiWidget::RhiWidget(QWidget* parent)
 }
 
 RhiWidget::~RhiWidget() {
-    delete m_renderer;
+    // 在 RHI 上下文仍然有效时释放渲染器资源
+    // 这确保所有 GPU 资源被正确释放，避免警告
+    if (m_renderer && rhi()) {
+        delete m_renderer;
+        m_renderer = nullptr;
+    }
+    
+    // 清理网格资源
     qDeleteAll(m_meshes);
 }
 

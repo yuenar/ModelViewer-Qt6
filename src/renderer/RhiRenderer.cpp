@@ -9,6 +9,7 @@ RhiRenderer::RhiRenderer(QRhi* rhi, QRhiRenderTarget* rt)
 }
 
 RhiRenderer::~RhiRenderer() {
+    // 释放所有渲染管线和资源绑定
     delete m_pipeline;      delete m_srb;
     delete m_frameUBO;      delete m_materialUBO;
     delete m_wireframePipeline; delete m_wireframeSrb;
@@ -18,6 +19,12 @@ RhiRenderer::~RhiRenderer() {
     delete m_flatShadingPipeline; delete m_flatShadingSrb;
     delete m_bgPipeline;    delete m_bgSrb;
     delete m_bgUBO;         delete m_bgVBuf;
+    delete m_pbrPipeline;          delete m_pbrSrb;
+    delete m_shadowMappingPipeline; delete m_shadowMappingSrb;
+    delete m_skyboxPipeline;       delete m_skyboxSrb;
+    delete m_selectionPipeline;     delete m_selectionSrb;
+    delete m_clippingPlanePipeline; delete m_clippingPlaneSrb;
+    delete m_splitScreenPipeline;   delete m_splitScreenSrb;
 }
 
 QShader RhiRenderer::loadShader(const QString& qsbPath) {
