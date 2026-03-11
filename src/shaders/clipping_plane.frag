@@ -2,9 +2,15 @@
 
 layout(location = 0) in vec2 texCoord;
 
-uniform bool selected;
-uniform vec3 planeColor;
-uniform sampler2D hatchMap;
+layout(std140, binding = 0) uniform ClippingPlaneUBO {
+    bool selected;
+    float _p0;
+    float _p1;
+    float _p2;
+    vec3 planeColor;
+};
+
+layout(binding = 1) uniform sampler2D hatchMap;
 
 layout(location = 0) out vec4 fragColor;
 

@@ -4,8 +4,13 @@ layout( location = 0 ) out vec4 fragColor;
 
 layout(location = 0) in vec3 fragmentColor;
 
-uniform bool renderCone = false;
-uniform vec3 coneColor;
+layout(std140, binding = 0) uniform AxisUBO {
+    bool renderCone;
+    float _p0;
+    float _p1;
+    float _p2;
+    vec3 coneColor;
+};
 
 void main()
 {

@@ -3,8 +3,12 @@
 layout(location = 0) in vec2 TexCoords;
 layout(location = 0) out vec4 color;
 
-uniform sampler2D text;
-uniform vec3 textColor;
+layout(std140, binding = 0) uniform TextColorUBO {
+    vec3 textColor;
+    float _p0;
+};
+
+layout(binding = 1) uniform sampler2D text;
 
 void main()
 {

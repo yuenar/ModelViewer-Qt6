@@ -1,8 +1,10 @@
 #version 450 core
 layout (location = 0) in vec3 aPos;
 
-uniform mat4 lightSpaceMatrix;
-uniform mat4 model;
+layout(std140, binding = 0) uniform ShadowUBO {
+    mat4 lightSpaceMatrix;
+    mat4 model;
+};
 
 void main()
 {

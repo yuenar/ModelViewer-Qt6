@@ -6,20 +6,29 @@ layout(location = 2) in vec2 texCoord2d;
 layout(location = 3) in vec3 vertexTangent;
 layout(location = 4) in vec3 vertexBitangent;
 
-uniform mat4 modelMatrix;
-uniform mat4 viewMatrix;
-uniform mat4 modelViewMatrix;
-uniform mat3 normalMatrix;
-uniform mat4 projectionMatrix;
-uniform vec4 clipPlaneX;
-uniform vec4 clipPlaneY;
-uniform vec4 clipPlaneZ;
-uniform mat4 lightSpaceMatrix;
-uniform vec3 cameraPos;
-uniform vec3 lightPos;
+layout(std140, binding = 0) uniform TransformUBO {
+    mat4 modelMatrix;
+    mat4 viewMatrix;
+    mat4 modelViewMatrix;
+    mat4 projectionMatrix;
+};
 
-// user defined clip plane
-uniform vec4 clipPlane;
+layout(std140, binding = 1) uniform ClipPlanesUBO {
+    vec4 clipPlaneX;
+    vec4 clipPlaneY;
+    vec4 clipPlaneZ;
+    vec4 clipPlane;
+};
+
+layout(std140, binding = 2) uniform LightingUBO {
+    mat3 normalMatrix;
+    float _p0;
+    mat4 lightSpaceMatrix;
+    vec3 cameraPos;
+    float _p1;
+    vec3 lightPos;
+    float _p2;
+};
 
 layout(location = 0) out float v_clipDistX;
 layout(location = 1) out float v_clipDistY;

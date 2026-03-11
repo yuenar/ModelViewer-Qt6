@@ -1,8 +1,13 @@
-#version 150
+#version 450 core
 layout(triangles) in;
 layout(line_strip, max_vertices=8) out;
 
-uniform float normal_length;
+layout(std140, binding = 0) uniform FaceNormalUBO {
+    float normal_length;
+    float _p0;
+    float _p1;
+    float _p2;
+};
 
 in mat4 MVP[];
 

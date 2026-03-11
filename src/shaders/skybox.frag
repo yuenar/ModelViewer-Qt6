@@ -4,10 +4,14 @@ layout(location = 0) out vec4 fragColor;
 
 layout(location = 0) in vec3 texCoords;
 
-uniform samplerCube skybox;
-uniform bool hdrToneMapping = false;
-uniform bool gammaCorrection = false;
-uniform float screenGamma = 2.2;
+layout(std140, binding = 0) uniform SkyboxUBO {
+    bool hdrToneMapping;
+    bool gammaCorrection;
+    float screenGamma;
+    float _p0;
+};
+
+layout(binding = 1) uniform samplerCube skybox;
 
 void main()
 {

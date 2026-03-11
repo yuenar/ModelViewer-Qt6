@@ -2,11 +2,13 @@
 
 layout(location = 0) in vec3 vertexPosition;
 
+layout(std140, binding = 0) uniform SkyboxTransformUBO {
+    mat4 projectionMatrix;
+    mat4 viewMatrix;
+};
+
 layout(location = 0) out vec3 texCoords;
 layout(location = 1) out vec3 worldPos;
-
-uniform mat4 projectionMatrix;
-uniform mat4 viewMatrix;
 
 void main()
 {

@@ -2,9 +2,12 @@
 
 layout(location = 0) out vec4 fragColor;
 
-uniform vec3 lightColor;
+layout(std140, binding = 0) uniform LightCubeUBO {
+    vec3 lightColor;
+    float _p0;
+};
 
 void main()
 {
-    fragColor = vec4(lightColor, 1.0f); // set alle 4 vector values to 1.0
+    fragColor = vec4(lightColor, 1.0f);
 }

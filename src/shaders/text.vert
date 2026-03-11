@@ -3,7 +3,9 @@
 layout (location = 0) in vec4 vertex; // <vec2 pos, vec2 tex>
 layout(location = 0) out vec2 TexCoords;
 
-uniform mat4 projection;
+layout(std140, binding = 0) uniform TextUBO {
+    mat4 projection;
+};
 
 void main()
 {

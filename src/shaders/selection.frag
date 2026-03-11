@@ -1,6 +1,8 @@
 #version 450 core
 
-uniform vec4 pickingColor;
+layout(std140, binding = 0) uniform SelectionUBO {
+    vec4 pickingColor;
+};
 
 layout(location = 0) out vec4 fragColor;
 

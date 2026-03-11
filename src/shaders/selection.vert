@@ -2,8 +2,10 @@
 
 layout(location = 0) in vec3 vertexPosition;
 
-uniform mat4 modelViewMatrix;
-uniform mat4 projectionMatrix;
+layout(std140, binding = 0) uniform TransformUBO {
+    mat4 modelViewMatrix;
+    mat4 projectionMatrix;
+};
 
 void main()
 {

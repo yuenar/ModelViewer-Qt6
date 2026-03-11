@@ -2,15 +2,18 @@
 
 layout(location = 0) in vec3 vertexPosition;
 
-uniform mat4 modelMatrix;
-uniform mat4 viewMatrix;
-uniform mat4 projectionMatrix;
+layout(std140, binding = 0) uniform TransformUBO {
+    mat4 modelMatrix;
+    mat4 viewMatrix;
+    mat4 projectionMatrix;
+};
 
-uniform vec4 clipPlaneX;
-uniform vec4 clipPlaneY;
-uniform vec4 clipPlaneZ;
-// user defined clip plane
-uniform vec4 clipPlane;
+layout(std140, binding = 1) uniform ClipPlanesUBO {
+    vec4 clipPlaneX;
+    vec4 clipPlaneY;
+    vec4 clipPlaneZ;
+    vec4 clipPlane;
+};
 
 layout(location = 0) out float v_clipDistX;
 layout(location = 1) out float v_clipDistY;

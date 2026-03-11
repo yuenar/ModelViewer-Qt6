@@ -1,9 +1,15 @@
-#version 330 core
+#version 450 core
 layout (triangles) in;
 layout (triangle_strip, max_vertices=256) out; 
 
 //uniforms
-uniform int sub_divisions;		 //the number of subdivisions
+layout(std140, binding = 0) uniform SubdivUBO {
+    int sub_divisions;
+    float _p0;
+    float _p1;
+    float _p2;
+};
+
 in mat4 MVP[];					//combined view projection matrix
 
 void main()

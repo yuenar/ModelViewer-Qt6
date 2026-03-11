@@ -4,9 +4,14 @@ layout(location = 0) out vec4 FragColor;
 
 layout(location = 0) in vec2 TexCoords;
 
-uniform sampler2D depthMap;
-uniform float near_plane;
-uniform float far_plane;
+layout(std140, binding = 0) uniform DebugUBO {
+    float near_plane;
+    float far_plane;
+    float _p0;
+    float _p1;
+};
+
+layout(binding = 1) uniform sampler2D depthMap;
 
 // required when using a perspective projection matrix
 float LinearizeDepth(float depth)

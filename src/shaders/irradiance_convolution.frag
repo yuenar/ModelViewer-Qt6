@@ -3,7 +3,7 @@
 layout(location = 0) out vec4 fragColor;
 layout(location = 0) in vec3 worldPos;
 
-uniform samplerCube environmentMap;
+layout(binding = 0) uniform samplerCube environmentMap;
 
 const float PI = 3.14159265359;
 

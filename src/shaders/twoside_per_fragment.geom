@@ -16,9 +16,14 @@ layout(location = 3) out vec3 g_tangent;
 layout(location = 4) out vec3 g_bitangent;
 
 noperspective layout(location = 5) out vec3 g_edgeDistance;
-uniform mat4 viewportMatrix; // Viewport matrix
 
-uniform int displayMode;
+layout(std140, binding = 0) uniform TwoSideGeomUBO {
+    mat4 viewportMatrix;
+    int displayMode;
+    float _p0;
+    float _p1;
+    float _p2;
+};
 
 layout(location = 6) in VS_OUT_SHADOW {
     layout(location = 6) vec3 FragPos;

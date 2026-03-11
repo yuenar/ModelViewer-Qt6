@@ -3,8 +3,14 @@
 layout(location = 0) out vec4 fragColor;
 layout(location = 0) in vec3 worldPos;
 
-uniform samplerCube environmentMap;
-uniform float roughness;
+layout(std140, binding = 0) uniform PrefilterUBO {
+    float roughness;
+    float _p0;
+    float _p1;
+    float _p2;
+};
+
+layout(binding = 1) uniform samplerCube environmentMap;
 
 const float PI = 3.14159265359;
 // ----------------------------------------------------------------------------

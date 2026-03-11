@@ -51,7 +51,7 @@ qt_add_executable(ModelViewer
     ${MATH_SOURCES}
 )
 
-# 编译 QSB 着色器 - 只编译已修复且正在使用的着色器
+# 编译 QSB 着色器 - 编译所有已修复的着色器
 qt_add_shaders(ModelViewer "shaders"
         # Qt6 着色器编译配置
         set(SHADER_COMPILE_OPTIONS
@@ -73,8 +73,28 @@ qt_add_shaders(ModelViewer "shaders"
         shaders/normals.frag
         shaders/background.vert
         shaders/background.frag
+        shaders/face_normal.vert
         shaders/face_normal.frag
+        shaders/vertex_normal.vert
         shaders/vertex_normal.frag
+        shaders/clipped_mesh.vert
+        shaders/clipped_mesh.frag
+        shaders/clipping_plane.vert
+        shaders/clipping_plane.frag
+        shaders/debug_quad.vert
+        shaders/debug_quad_depth.frag
+        shaders/light_cube.vert
+        shaders/selection.vert
+        shaders/selection.frag
+        shaders/shadow_mapping_depth.vert
+        shaders/shadow_mapping_depth.frag
+        shaders/skybox.vert
+        shaders/skybox.frag
+        shaders/splitScreen.vert
+        shaders/splitScreen.frag
+        shaders/text.vert
+        shaders/text.frag
+        shaders/twoside_per_fragment.vert
 )
 
 target_link_libraries(ModelViewer PRIVATE

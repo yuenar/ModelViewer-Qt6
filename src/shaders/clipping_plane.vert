@@ -3,9 +3,11 @@
 layout (location = 0) in vec3 vertexPosition;
 layout(location = 1) in vec2 texCoord2d;
 
-uniform mat4 modelMatrix;
-uniform mat4 viewMatrix;
-uniform mat4 projectionMatrix;
+layout(std140, binding = 0) uniform TransformUBO {
+    mat4 modelMatrix;
+    mat4 viewMatrix;
+    mat4 projectionMatrix;
+};
 
 layout(location = 0) out vec2 texCoord;
 

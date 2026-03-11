@@ -7,13 +7,17 @@ out VS_OUT {
     layout(location = 0) vec3 normal;
 } vs_out;
 
-uniform mat4 modelViewMatrix;
-uniform mat4 projectionMatrix;
-uniform vec4 clipPlaneX;
-uniform vec4 clipPlaneY;
-uniform vec4 clipPlaneZ;
-// user defined clip plane
-uniform vec4 clipPlane;
+layout(std140, binding = 0) uniform TransformUBO {
+    mat4 modelViewMatrix;
+    mat4 projectionMatrix;
+};
+
+layout(std140, binding = 1) uniform ClipPlanesUBO {
+    vec4 clipPlaneX;
+    vec4 clipPlaneY;
+    vec4 clipPlaneZ;
+    vec4 clipPlane;
+};
 
 layout(location = 1) out float clipDistX;
 layout(location = 2) out float clipDistY;
