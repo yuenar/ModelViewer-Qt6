@@ -131,12 +131,10 @@ private:
     // Skybox 管线
     QRhiGraphicsPipeline* m_skyboxPipeline = nullptr;
     QRhiShaderResourceBindings* m_skyboxSrb = nullptr;
-    QRhiBuffer* m_skyboxUBO = nullptr;
     
     // Selection 管线
     QRhiGraphicsPipeline* m_selectionPipeline = nullptr;
     QRhiShaderResourceBindings* m_selectionSrb = nullptr;
-    QRhiBuffer* m_selectionUBO = nullptr;
     
     // Clipping Plane 管线
     QRhiGraphicsPipeline* m_clippingPlanePipeline = nullptr;
