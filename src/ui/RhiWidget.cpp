@@ -125,3 +125,17 @@ void RhiWidget::wheelEvent(QWheelEvent* e) {
     m_camera.zoom(e->angleDelta().y() / 120.0f);
     update();
 }
+
+void RhiWidget::saveScreenshot(const QString& filePath) {
+    QImage image = grabFramebuffer();
+    if (image.isNull()) {
+        qWarning() << "Failed to grab framebuffer";
+        return;
+    }
+    
+    if (!image.save(filePath)) {
+        qWarning() << "Failed to save screenshot to" << filePath;
+    } else {
+        qDebug() << "Screenshot saved to" << filePath;
+    }
+}

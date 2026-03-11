@@ -21,6 +21,7 @@ public:
     void setLight(const Light& light);
     Light getLight() const { return m_light; }
     void fitToView();
+    void saveScreenshot(const QString& filePath);
     
 protected:
     void initialize(QRhiCommandBuffer* cb) override;

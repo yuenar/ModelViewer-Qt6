@@ -133,7 +133,6 @@ void MainWindow::onScreenshot() {
     );
     
     if (!path.isEmpty()) {
-        // 暂时跳过截图功能
-        QMessageBox::information(this, "Info", "Screenshot not implemented yet");
+        m_rhiWidget->saveScreenshot(path);
     }
 }
