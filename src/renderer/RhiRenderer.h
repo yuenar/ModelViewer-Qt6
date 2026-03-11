@@ -23,6 +23,27 @@ struct alignas(16) MaterialUBOData {
     float specular[3];   float _pad1;
 };
 
+struct alignas(16) BackgroundUBOData {
+    float topColor[4];
+    float botColor[4];
+};
+
+// 渲染模式枚举
+enum class RenderMode {
+    Phong = 0,
+    Wireframe = 1,
+    Normals = 2,
+    FaceNormals = 3,
+    VertexNormals = 4,
+    FlatShading = 5,
+    PBR = 6,
+    ShadowMapping = 7,
+    Skybox = 8,
+    Selection = 9,
+    ClippingPlane = 10,
+    SplitScreen = 11
+};
+
 class RhiRenderer {
 public:
     RhiRenderer(QRhi* rhi, QRhiRenderTarget* rt);
@@ -32,6 +53,12 @@ public:
     void setRenderTarget(QRhiRenderTarget* rt);
     void releaseAndRebuildPipelines();
     void setRenderMode(int mode);
+    void setRenderMode(RenderMode mode) { setRenderMode(static_cast<int>(mode)); }
+    void uploadMeshes(QRhiCommandBuffer* cb, const QVector<RhiMesh*>& meshes);
+    void resetMeshUploadFlag() { m_meshesUploaded = false; }
+    
+    // 背景设置
+    void setBackgroundColors(const QVector3D& topColor, const QVector3D& botColor);
     
     void render(QRhiCommandBuffer* cb,
                 const QVector<RhiMesh*>& meshes,
@@ -43,7 +70,16 @@ private:
     void buildPipeline();
     void buildWireframePipeline();
     void buildNormalsPipeline();
+    void buildFaceNormalsPipeline();
+    void buildVertexNormalsPipeline();
     void buildBackgroundPipeline();
+    void buildFlatShadingPipeline();
+    void buildPBRPipeline();
+    void buildShadowMappingPipeline();
+    void buildSkyboxPipeline();
+    void buildSelectionPipeline();
+    void buildClippingPlanePipeline();
+    void buildSplitScreenPipeline();
     QShader loadShader(const QString& qsbPath);
     
     QRhi* m_rhi;
@@ -64,11 +100,56 @@ private:
     QRhiShaderResourceBindings* m_normalsSrb = nullptr;
     QRhiBuffer* m_normalsUBO = nullptr;
     
+    // Face Normals 管线
+    QRhiGraphicsPipeline* m_faceNormalsPipeline = nullptr;
+    QRhiShaderResourceBindings* m_faceNormalsSrb = nullptr;
+    QRhiBuffer* m_faceNormalsUBO = nullptr;
+    
+    // Vertex Normals 管线
+    QRhiGraphicsPipeline* m_vertexNormalsPipeline = nullptr;
+    QRhiShaderResourceBindings* m_vertexNormalsSrb = nullptr;
+    QRhiBuffer* m_vertexNormalsUBO = nullptr;
+    
+    // Flat Shading 管线
+    QRhiGraphicsPipeline* m_flatShadingPipeline = nullptr;
+    QRhiShaderResourceBindings* m_flatShadingSrb = nullptr;
+    
     // Background 管线
     QRhiGraphicsPipeline* m_bgPipeline = nullptr;
     QRhiShaderResourceBindings* m_bgSrb = nullptr;
     QRhiBuffer* m_bgUBO = nullptr;
     QRhiBuffer* m_bgVBuf = nullptr;
     
+    // PBR 管线
+    QRhiGraphicsPipeline* m_pbrPipeline = nullptr;
+    QRhiShaderResourceBindings* m_pbrSrb = nullptr;
+    
+    // Shadow Mapping 管线
+    QRhiGraphicsPipeline* m_shadowMappingPipeline = nullptr;
+    QRhiShaderResourceBindings* m_shadowMappingSrb = nullptr;
+    
+    // Skybox 管线
+    QRhiGraphicsPipeline* m_skyboxPipeline = nullptr;
+    QRhiShaderResourceBindings* m_skyboxSrb = nullptr;
+    QRhiBuffer* m_skyboxUBO = nullptr;
+    
+    // Selection 管线
+    QRhiGraphicsPipeline* m_selectionPipeline = nullptr;
+    QRhiShaderResourceBindings* m_selectionSrb = nullptr;
+    QRhiBuffer* m_selectionUBO = nullptr;
+    
+    // Clipping Plane 管线
+    QRhiGraphicsPipeline* m_clippingPlanePipeline = nullptr;
+    QRhiShaderResourceBindings* m_clippingPlaneSrb = nullptr;
+    
+    // Split Screen 管线
+    QRhiGraphicsPipeline* m_splitScreenPipeline = nullptr;
+    QRhiShaderResourceBindings* m_splitScreenSrb = nullptr;
+    
     int m_renderMode = 0;
+    bool m_meshesUploaded = false;
+    
+    // 背景颜色
+    QVector3D m_bgTopColor{0.2f, 0.2f, 0.3f};
+    QVector3D m_bgBotColor{0.1f, 0.1f, 0.15f};
 };

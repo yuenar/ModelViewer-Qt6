@@ -2,6 +2,7 @@
 #include "../renderer/RhiRenderer.h"
 #include "../loader/ModelLoader.h"
 #include "../math/BoundingBox.h"
+#include "../math/Camera.h"
 #include <QMouseEvent>
 #include <QWheelEvent>
 #include <QFileDialog>
@@ -45,7 +46,6 @@ void RhiWidget::render(QRhiCommandBuffer* cb) {
 void RhiWidget::loadModel(const QString& filePath) {
     qDebug() << "loadModel called with path:" << filePath;
     
-    // 如果路径为空，不执行任何操作
     if (filePath.isEmpty()) {
         qDebug() << "Empty path, not clearing meshes";
         return;
@@ -53,18 +53,23 @@ void RhiWidget::loadModel(const QString& filePath) {
     
     qDeleteAll(m_meshes);
     m_meshes.clear();
+    m_sceneBbox = BoundingBox();
     
     ModelLoader loader;
     const auto cpuMeshes = loader.loadCPU(filePath);
     
-    BoundingBox sceneBbox;
-    for (auto& cpuMesh : cpuMeshes) {
-        auto* mesh = new RhiMesh(rhi(), cpuMesh);
-        mesh->upload();
+    for (const auto& cpuMesh : cpuMeshes) {
+        auto* mesh = new RhiMesh(nullptr, cpuMesh);
         m_meshes.append(mesh);
-        sceneBbox.expand(cpuMesh.bbox);
+        m_sceneBbox.expand(cpuMesh.bbox);
     }
-    m_camera.fitToView(sceneBbox);
+    m_camera.fitToView(m_sceneBbox);
+    
+    // 重置renderer的上传标志
+    if (m_renderer) {
+        m_renderer->resetMeshUploadFlag();
+    }
+    
     update();
 }
 
@@ -85,12 +90,16 @@ void RhiWidget::setLight(const Light& light) {
     update();
 }
 
+void RhiWidget::setBackgroundColors(const QVector3D& topColor, const QVector3D& botColor) {
+    if (m_renderer) {
+        m_renderer->setBackgroundColors(topColor, botColor);
+        update();
+    }
+}
+
 void RhiWidget::fitToView() {
     if (!m_meshes.isEmpty()) {
-        BoundingBox sceneBbox;
-        // 需要从CpuMesh获取bbox，暂时使用默认值
-        // 实际应该在加载时保存bbox信息
-        m_camera.fitToView(sceneBbox);
+        m_camera.fitToView(m_sceneBbox);
         update();
     }
 }
@@ -119,5 +128,29 @@ void RhiWidget::mouseReleaseEvent(QMouseEvent*) {
 
 void RhiWidget::wheelEvent(QWheelEvent* e) {
     m_camera.zoom(e->angleDelta().y() / 120.0f);
+    update();
+}
+
+void RhiWidget::saveScreenshot(const QString& filePath) {
+    QImage image = grabFramebuffer();
+    if (image.isNull()) {
+        qWarning() << "Failed to grab framebuffer";
+        return;
+    }
+    
+    if (!image.save(filePath)) {
+        qWarning() << "Failed to save screenshot to" << filePath;
+    } else {
+        qDebug() << "Screenshot saved to" << filePath;
+    }
+}
+
+void RhiWidget::toggleProjection() {
+    // 切换投影类型
+    static ProjectionType currentType = ProjectionType::Perspective;
+    currentType = (currentType == ProjectionType::Perspective) 
+                  ? ProjectionType::Orthographic 
+                  : ProjectionType::Perspective;
+    m_camera.setProjectionType(currentType);
     update();
 }

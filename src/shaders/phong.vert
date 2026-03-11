@@ -19,7 +19,7 @@ layout(location = 1) out vec3 fragNormal;
 
 void main() {
     vec4 worldPos = model * vec4(inPosition, 1.0);
-    fragPos = worldPos.xyz;
-    fragNormal = mat3(normalMatrix) * inNormal;
-    gl_Position = projection * view * worldPos;
+    fragPos       = worldPos.xyz;
+    fragNormal    = mat3(normalMatrix) * inNormal;
+    gl_Position   = projection * view * worldPos;
 }

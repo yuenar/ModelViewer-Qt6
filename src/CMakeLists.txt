@@ -51,9 +51,9 @@ qt_add_executable(ModelViewer
     ${MATH_SOURCES}
 )
 
-# 编译 QSB 着色器
+# 编译 QSB 着色器 - 编译所有已修复的着色器
 qt_add_shaders(ModelViewer "shaders"
-        # Qt6 着色器编译配置 - 使用官方推荐的 --qt6 参数等价配置
+        # Qt6 着色器编译配置
         set(SHADER_COMPILE_OPTIONS
             PRECOMPILE
             OPTIMIZE
@@ -62,13 +62,7 @@ qt_add_shaders(ModelViewer "shaders"
             MSL 12
         )
 
-        # 使用 Qt 官方推荐的标准配置，等价于 qsb --qt6
-        # 这确保与 Qt Quick 材质和特效的最佳兼容性
-        set(VERTEX_SHADER_TARGETS "")
-        set(FRAGMENT_SHADER_TARGETS "")
-        set(SHADER_BACKENDS "glsl,hlsl,msl")
-
-        message(STATUS "Using Qt6 standard shader compilation (equivalent to --qt6)")
+        message(STATUS "Using Qt6 standard shader compilation")
 
     FILES
         shaders/phong.vert
@@ -76,10 +70,36 @@ qt_add_shaders(ModelViewer "shaders"
         shaders/wireframe.vert
         shaders/wireframe.frag
         shaders/normals.vert
-        shaders/normals.vert
         shaders/normals.frag
         shaders/background.vert
         shaders/background.frag
+        shaders/face_normal.vert
+        shaders/face_normal.frag
+        shaders/vertex_normal.vert
+        shaders/vertex_normal.frag
+        shaders/axis.vert
+        shaders/axis.frag
+        shaders/clipped_mesh.vert
+        shaders/clipped_mesh.frag
+        shaders/clipping_plane.vert
+        shaders/clipping_plane.frag
+        shaders/debug_quad.vert
+        shaders/debug_quad_depth.frag
+        shaders/light_cube.vert
+        shaders/light_cube.frag
+        shaders/irradiance_convolution.frag
+        shaders/selection.vert
+        shaders/selection.frag
+        shaders/shadow_mapping_depth.vert
+        shaders/shadow_mapping_depth.frag
+        shaders/skybox.vert
+        shaders/skybox.frag
+        shaders/splitScreen.vert
+        shaders/splitScreen.frag
+        shaders/text.vert
+        shaders/text.frag
+        shaders/brdf.vert
+        shaders/brdf.frag
 )
 
 target_link_libraries(ModelViewer PRIVATE

@@ -8,10 +8,9 @@ RhiMesh::RhiMesh(QRhi* rhi, const CpuMesh& cpu)
 RhiMesh::~RhiMesh() {
     delete m_vbuf;
     delete m_ibuf;
-    delete m_pendingBatch;
 }
 
-void RhiMesh::upload() {
+void RhiMesh::upload(QRhiResourceUpdateBatch* batch) {
     const quint32 vbufSize = m_cpuData.vertices.size() * sizeof(CpuMesh::Vertex);
     const quint32 ibufSize = m_cpuData.indices.size() * sizeof(quint32);
     
@@ -23,7 +22,6 @@ void RhiMesh::upload() {
                                QRhiBuffer::IndexBuffer, ibufSize);
     m_ibuf->create();
     
-    m_pendingBatch = m_rhi->nextResourceUpdateBatch();
-    m_pendingBatch->uploadStaticBuffer(m_vbuf, m_cpuData.vertices.constData());
-    m_pendingBatch->uploadStaticBuffer(m_ibuf, m_cpuData.indices.constData());
+    batch->uploadStaticBuffer(m_vbuf, m_cpuData.vertices.constData());
+    batch->uploadStaticBuffer(m_ibuf, m_cpuData.indices.constData());
 }
