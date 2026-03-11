@@ -32,6 +32,8 @@ public:
     void setRenderTarget(QRhiRenderTarget* rt);
     void releaseAndRebuildPipelines();
     void setRenderMode(int mode);
+    void uploadMeshes(QRhiCommandBuffer* cb, const QVector<RhiMesh*>& meshes);
+    void resetMeshUploadFlag() { m_meshesUploaded = false; }
     
     void render(QRhiCommandBuffer* cb,
                 const QVector<RhiMesh*>& meshes,
@@ -71,4 +73,5 @@ private:
     QRhiBuffer* m_bgVBuf = nullptr;
     
     int m_renderMode = 0;
+    bool m_meshesUploaded = false;
 };

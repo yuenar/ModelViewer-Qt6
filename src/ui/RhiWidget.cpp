@@ -45,7 +45,6 @@ void RhiWidget::render(QRhiCommandBuffer* cb) {
 void RhiWidget::loadModel(const QString& filePath) {
     qDebug() << "loadModel called with path:" << filePath;
     
-    // 如果路径为空，不执行任何操作
     if (filePath.isEmpty()) {
         qDebug() << "Empty path, not clearing meshes";
         return;
@@ -58,13 +57,18 @@ void RhiWidget::loadModel(const QString& filePath) {
     const auto cpuMeshes = loader.loadCPU(filePath);
     
     BoundingBox sceneBbox;
-    for (auto& cpuMesh : cpuMeshes) {
-        auto* mesh = new RhiMesh(rhi(), cpuMesh);
-        mesh->upload();
+    for (const auto& cpuMesh : cpuMeshes) {
+        auto* mesh = new RhiMesh(nullptr, cpuMesh);
         m_meshes.append(mesh);
         sceneBbox.expand(cpuMesh.bbox);
     }
     m_camera.fitToView(sceneBbox);
+    
+    // 重置renderer的上传标志
+    if (m_renderer) {
+        m_renderer->resetMeshUploadFlag();
+    }
+    
     update();
 }
 

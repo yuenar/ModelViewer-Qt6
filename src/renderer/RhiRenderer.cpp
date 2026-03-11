@@ -23,7 +23,7 @@ QShader RhiRenderer::loadShader(const QString& qsbPath) {
     return QShader::fromSerialized(f.readAll());
 }
 
-void RhiRenderer::initialize(QRhiCommandBuffer*) {
+void RhiRenderer::initialize(QRhiCommandBuffer* cb) {
     m_frameUBO = m_rhi->newBuffer(QRhiBuffer::Dynamic,
                                    QRhiBuffer::UniformBuffer,
                                    sizeof(FrameUBOData));
@@ -38,6 +38,28 @@ void RhiRenderer::initialize(QRhiCommandBuffer*) {
     buildWireframePipeline();
     buildNormalsPipeline();
     buildBackgroundPipeline();
+    
+    // 上传背景顶点数据
+    static const float bgVerts[] = {
+        -1, -1,   1, -1,   -1,  1,
+        -1,  1,   1, -1,    1,  1,
+    };
+    auto* bgBatch = m_rhi->nextResourceUpdateBatch();
+    bgBatch->uploadStaticBuffer(m_bgVBuf, bgVerts);
+    cb->resourceUpdate(bgBatch);
+}
+
+void RhiRenderer::uploadMeshes(QRhiCommandBuffer* cb, const QVector<RhiMesh*>& meshes) {
+    if (m_meshesUploaded || meshes.isEmpty())
+        return;
+    
+    auto* batch = m_rhi->nextResourceUpdateBatch();
+    for (RhiMesh* mesh : meshes) {
+        mesh->setRhi(m_rhi);
+        mesh->upload(batch);
+    }
+    cb->resourceUpdate(batch);
+    m_meshesUploaded = true;
 }
 
 void RhiRenderer::buildPipeline() {
@@ -201,11 +223,6 @@ void RhiRenderer::buildBackgroundPipeline() {
     m_bgPipeline->setDepthWrite(false);
     m_bgPipeline->setTopology(QRhiGraphicsPipeline::Triangles);
     m_bgPipeline->create();
-    
-    // 上传背景顶点数据
-    auto* bgBatch = m_rhi->nextResourceUpdateBatch();
-    bgBatch->uploadStaticBuffer(m_bgVBuf, bgVerts);
-    // 注意：bgBatch需要在下一次render时提交
 }
 
 void RhiRenderer::render(QRhiCommandBuffer* cb,
@@ -215,6 +232,17 @@ void RhiRenderer::render(QRhiCommandBuffer* cb,
                           const Material& mat)
 {
     qDebug() << "Rendering" << meshes.size() << "meshes, mode:" << m_renderMode;
+    
+    // 第一次render时上传mesh数据
+    uploadMeshes(cb, meshes);
+    
+    // 检查mesh缓冲是否有效
+    for (RhiMesh* mesh : meshes) {
+        if (!mesh->vertexBuffer() || !mesh->indexBuffer()) {
+            qWarning() << "Invalid mesh buffers!";
+            return;
+        }
+    }
     
     FrameUBOData frameData;
     const QMatrix4x4 view = cam.viewMatrix();
@@ -253,59 +281,26 @@ void RhiRenderer::render(QRhiCommandBuffer* cb,
     cb->setViewport({ 0, 0, float(sz.width()), float(sz.height()) });
     
     // 绘制背景
-    cb->setGraphicsPipeline(m_bgPipeline);
-    cb->setShaderResources(m_bgSrb);
-    const QRhiCommandBuffer::VertexInput bgVBufBind(m_bgVBuf, 0);
-    cb->setVertexInput(0, 1, &bgVBufBind);
-    cb->draw(6);
+    if (m_bgPipeline && m_bgVBuf) {
+        cb->setGraphicsPipeline(m_bgPipeline);
+        cb->setShaderResources(m_bgSrb);
+        const QRhiCommandBuffer::VertexInput bgVBufBind(m_bgVBuf, 0);
+        cb->setVertexInput(0, 1, &bgVBufBind);
+        cb->draw(6);
+    }
     
     // 绘制模型
     if (m_renderMode == 0) {
-        qDebug() << "Using Phong rendering mode";
         // Phong 模式
         cb->setGraphicsPipeline(m_pipeline);
         cb->setShaderResources(m_srb);
         
-        // 临时测试：绘制一个固定的三角形
-        if (meshes.isEmpty()) {
-            qDebug() << "No meshes, drawing test triangle";
-            struct TestVertex {
-                float pos[3];
-            };
-            TestVertex testVerts[3] = {
-                {0.0f, 0.5f, 0.0f},
-                {-0.5f, -0.5f, 0.0f},
-                {0.5f, -0.5f, 0.0f}
-            };
-            
-            auto* testBuf = m_rhi->newBuffer(QRhiBuffer::Immutable, QRhiBuffer::VertexBuffer, sizeof(testVerts));
-            testBuf->create();
-            auto* batch = m_rhi->nextResourceUpdateBatch();
-            batch->uploadStaticBuffer(testBuf, testVerts);
-            
-            QRhiVertexInputLayout testLayout;
-            testLayout.setBindings({ { sizeof(TestVertex) } });
-            testLayout.setAttributes({ { 0, 0, QRhiVertexInputAttribute::Float3, 0 } });
-            
-            auto* testPipeline = m_rhi->newGraphicsPipeline();
-            testPipeline->setShaderStages(m_pipeline->shaderStages());
-            testPipeline->setVertexInputLayout(testLayout);
-            testPipeline->setShaderResourceBindings(m_srb);
-            testPipeline->setRenderPassDescriptor(m_rt->renderPassDescriptor());
-            testPipeline->create();
-            
-            cb->setGraphicsPipeline(testPipeline);
-            QRhiCommandBuffer::VertexInput testBind(testBuf, 0);
-            cb->setVertexInput(0, 1, &testBind);
-            cb->draw(3);
-        } else {
-            for (RhiMesh* mesh : meshes) {
-                const QRhiCommandBuffer::VertexInput vbufBind(mesh->vertexBuffer(), 0);
-                cb->setVertexInput(0, 1, &vbufBind,
-                                   mesh->indexBuffer(),
-                                   0, QRhiCommandBuffer::IndexUInt32);
-                cb->drawIndexed(mesh->indexCount());
-            }
+        for (RhiMesh* mesh : meshes) {
+            const QRhiCommandBuffer::VertexInput vbufBind(mesh->vertexBuffer(), 0);
+            cb->setVertexInput(0, 1, &vbufBind,
+                               mesh->indexBuffer(),
+                               0, QRhiCommandBuffer::IndexUInt32);
+            cb->drawIndexed(mesh->indexCount());
         }
     } else if (m_renderMode == 1) {
         // Wireframe 模式
@@ -322,7 +317,9 @@ void RhiRenderer::render(QRhiCommandBuffer* cb,
     } else if (m_renderMode == 2) {
         // Normals 模式
         float normalLength = 0.1f;
-        updates->updateDynamicBuffer(m_normalsUBO, 0, sizeof(float), &normalLength);
+        auto* normalsUpdate = m_rhi->nextResourceUpdateBatch();
+        normalsUpdate->updateDynamicBuffer(m_normalsUBO, 0, sizeof(float), &normalLength);
+        cb->resourceUpdate(normalsUpdate);
         
         cb->setGraphicsPipeline(m_normalsPipeline);
         cb->setShaderResources(m_normalsSrb);
