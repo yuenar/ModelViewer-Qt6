@@ -67,6 +67,9 @@ void RhiRenderer::buildPipeline() {
         { QRhiShaderStage::Vertex,   loadShader(":/shaders/phong.vert.qsb") },
         { QRhiShaderStage::Fragment, loadShader(":/shaders/phong.frag.qsb") },
     });
+    
+    qDebug() << "Phong vertex shader valid:" << loadShader(":/shaders/phong.vert.qsb").isValid();
+    qDebug() << "Phong fragment shader valid:" << loadShader(":/shaders/phong.frag.qsb").isValid();
     m_pipeline->setVertexInputLayout(inputLayout);
     m_pipeline->setShaderResourceBindings(m_srb);
     m_pipeline->setRenderPassDescriptor(m_rt->renderPassDescriptor());
@@ -77,7 +80,8 @@ void RhiRenderer::buildPipeline() {
     m_pipeline->setCullMode(QRhiGraphicsPipeline::Back);
     m_pipeline->setFrontFace(QRhiGraphicsPipeline::CCW);
     m_pipeline->setTopology(QRhiGraphicsPipeline::Triangles);
-    m_pipeline->create();
+    bool success = m_pipeline->create();
+    qDebug() << "Phong pipeline created:" << success;
 }
 
 void RhiRenderer::buildWireframePipeline() {
@@ -147,7 +151,6 @@ void RhiRenderer::buildNormalsPipeline() {
     m_normalsPipeline = m_rhi->newGraphicsPipeline();
     m_normalsPipeline->setShaderStages({
         {QRhiShaderStage::Vertex, loadShader(":/shaders/normals.vert.qsb")},
-        {QRhiShaderStage::Geometry, loadShader(":/shaders/normals.vert.qsb")},
         {QRhiShaderStage::Fragment, loadShader(":/shaders/normals.frag.qsb")},
     });
     m_normalsPipeline->setVertexInputLayout(inputLayout);
@@ -211,6 +214,8 @@ void RhiRenderer::render(QRhiCommandBuffer* cb,
                           const Light& light,
                           const Material& mat)
 {
+    qDebug() << "Rendering" << meshes.size() << "meshes, mode:" << m_renderMode;
+    
     FrameUBOData frameData;
     const QMatrix4x4 view = cam.viewMatrix();
     const QMatrix4x4 proj = m_rhi->clipSpaceCorrMatrix() * cam.projectionMatrix();
@@ -256,16 +261,51 @@ void RhiRenderer::render(QRhiCommandBuffer* cb,
     
     // 绘制模型
     if (m_renderMode == 0) {
+        qDebug() << "Using Phong rendering mode";
         // Phong 模式
         cb->setGraphicsPipeline(m_pipeline);
         cb->setShaderResources(m_srb);
         
-        for (RhiMesh* mesh : meshes) {
-            const QRhiCommandBuffer::VertexInput vbufBind(mesh->vertexBuffer(), 0);
-            cb->setVertexInput(0, 1, &vbufBind,
-                               mesh->indexBuffer(),
-                               0, QRhiCommandBuffer::IndexUInt32);
-            cb->drawIndexed(mesh->indexCount());
+        // 临时测试：绘制一个固定的三角形
+        if (meshes.isEmpty()) {
+            qDebug() << "No meshes, drawing test triangle";
+            struct TestVertex {
+                float pos[3];
+            };
+            TestVertex testVerts[3] = {
+                {0.0f, 0.5f, 0.0f},
+                {-0.5f, -0.5f, 0.0f},
+                {0.5f, -0.5f, 0.0f}
+            };
+            
+            auto* testBuf = m_rhi->newBuffer(QRhiBuffer::Immutable, QRhiBuffer::VertexBuffer, sizeof(testVerts));
+            testBuf->create();
+            auto* batch = m_rhi->nextResourceUpdateBatch();
+            batch->uploadStaticBuffer(testBuf, testVerts);
+            
+            QRhiVertexInputLayout testLayout;
+            testLayout.setBindings({ { sizeof(TestVertex) } });
+            testLayout.setAttributes({ { 0, 0, QRhiVertexInputAttribute::Float3, 0 } });
+            
+            auto* testPipeline = m_rhi->newGraphicsPipeline();
+            testPipeline->setShaderStages(m_pipeline->shaderStages());
+            testPipeline->setVertexInputLayout(testLayout);
+            testPipeline->setShaderResourceBindings(m_srb);
+            testPipeline->setRenderPassDescriptor(m_rt->renderPassDescriptor());
+            testPipeline->create();
+            
+            cb->setGraphicsPipeline(testPipeline);
+            QRhiCommandBuffer::VertexInput testBind(testBuf, 0);
+            cb->setVertexInput(0, 1, &testBind);
+            cb->draw(3);
+        } else {
+            for (RhiMesh* mesh : meshes) {
+                const QRhiCommandBuffer::VertexInput vbufBind(mesh->vertexBuffer(), 0);
+                cb->setVertexInput(0, 1, &vbufBind,
+                                   mesh->indexBuffer(),
+                                   0, QRhiCommandBuffer::IndexUInt32);
+                cb->drawIndexed(mesh->indexCount());
+            }
         }
     } else if (m_renderMode == 1) {
         // Wireframe 模式

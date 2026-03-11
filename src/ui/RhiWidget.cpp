@@ -17,6 +17,7 @@ RhiWidget::~RhiWidget() {
 }
 
 void RhiWidget::initialize(QRhiCommandBuffer* cb) {
+    qDebug() << "RhiWidget::initialize called";
     if (!m_renderer) {
         m_renderer = new RhiRenderer(rhi(), renderTarget());
         m_renderer->initialize(cb);
@@ -27,13 +28,29 @@ void RhiWidget::initialize(QRhiCommandBuffer* cb) {
 }
 
 void RhiWidget::render(QRhiCommandBuffer* cb) {
+    qDebug() << "RhiWidget::render called, meshes:" << m_meshes.size();
+    if (!m_renderer) {
+        qDebug() << "ERROR: m_renderer is null!";
+        return;
+    }
     const QSize pixelSize = renderTarget()->pixelSize();
+    qDebug() << "Render target size:" << pixelSize;
     m_camera.setAspectRatio(float(pixelSize.width()) / float(pixelSize.height()));
     
+    qDebug() << "Calling m_renderer->render...";
     m_renderer->render(cb, m_meshes, m_camera, m_light, m_material);
+    qDebug() << "m_renderer->render completed";
 }
 
 void RhiWidget::loadModel(const QString& filePath) {
+    qDebug() << "loadModel called with path:" << filePath;
+    
+    // 如果路径为空，不执行任何操作
+    if (filePath.isEmpty()) {
+        qDebug() << "Empty path, not clearing meshes";
+        return;
+    }
+    
     qDeleteAll(m_meshes);
     m_meshes.clear();
     
