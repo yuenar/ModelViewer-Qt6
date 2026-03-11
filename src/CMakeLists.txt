@@ -76,7 +76,7 @@ qt_add_shaders(ModelViewer "shaders"
         shaders/wireframe.vert
         shaders/wireframe.frag
         shaders/normals.vert
-        shaders/normals.vert
+ 
         shaders/normals.frag
         shaders/background.vert
         shaders/background.frag

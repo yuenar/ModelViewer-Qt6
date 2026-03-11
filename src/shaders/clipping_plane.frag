@@ -1,12 +1,12 @@
 #version 450 core
 
-in vec2 texCoord;
+layout(location = 0) in vec2 texCoord;
 
 uniform bool selected;
 uniform vec3 planeColor;
 uniform sampler2D hatchMap;
 
-out vec4 fragColor;
+layout(location = 0) out vec4 fragColor;
 
 void main()
 {

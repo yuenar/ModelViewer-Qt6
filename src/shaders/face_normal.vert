@@ -4,7 +4,7 @@ layout (location = 0) in vec3 vertexPosition;
 layout (location = 1) in vec3 vertexNormal;
 
 out VS_OUT {
-    vec3 normal;
+    layout(location = 0) vec3 normal;
 } vs_out;
 
 uniform mat4 modelViewMatrix;
@@ -15,10 +15,10 @@ uniform vec4 clipPlaneZ;
 // user defined clip plane
 uniform vec4 clipPlane;
 
-out float clipDistX;
-out float clipDistY;
-out float clipDistZ;
-out float clipDist;
+layout(location = 1) out float clipDistX;
+layout(location = 2) out float clipDistY;
+layout(location = 3) out float clipDistZ;
+layout(location = 4) out float clipDist;
 
 void main()
 {

@@ -2,7 +2,7 @@
 
 layout( location = 0 ) out vec4 fragColor;
 
-in vec3 fragmentColor;
+layout(location = 0) in vec3 fragmentColor;
 
 uniform bool renderCone = false;
 uniform vec3 coneColor;

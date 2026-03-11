@@ -12,7 +12,7 @@ in Vertex
     vec4 color;
 } vertex[];
 
-out vec4 v_color;
+layout(location = 0) out vec4 v_color;
 
 void main()
 {

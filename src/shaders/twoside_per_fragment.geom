@@ -3,63 +3,63 @@
 layout(triangles) in;
 layout(triangle_strip, max_vertices=6) out;
 
-in vec3 v_position[];
-in vec3 v_normal[];
-in vec2 v_texCoord2d[];
-in vec3 v_tangent[];
-in vec3 v_bitangent[];
+layout(location = 0) in vec3 v_position[];
+layout(location = 1) in vec3 v_normal[];
+layout(location = 2) in vec2 v_texCoord2d[];
+layout(location = 3) in vec3 v_tangent[];
+layout(location = 4) in vec3 v_bitangent[];
 
-out vec3 g_normal;
-out vec3 g_position;
-out vec2 g_texCoord2d;
-out vec3 g_tangent;
-out vec3 g_bitangent;
+layout(location = 0) out vec3 g_normal;
+layout(location = 1) out vec3 g_position;
+layout(location = 2) out vec2 g_texCoord2d;
+layout(location = 3) out vec3 g_tangent;
+layout(location = 4) out vec3 g_bitangent;
 
-noperspective out vec3 g_edgeDistance;
+noperspective layout(location = 5) out vec3 g_edgeDistance;
 uniform mat4 viewportMatrix; // Viewport matrix
 
 uniform int displayMode;
 
-in VS_OUT_SHADOW {
-    vec3 FragPos;
-    vec3 Normal;
-    vec2 TexCoords;
-    vec4 FragPosLightSpace;
-    vec3 cameraPos;
-    vec3 lightPos;
+layout(location = 6) in VS_OUT_SHADOW {
+    layout(location = 6) vec3 FragPos;
+    layout(location = 7) vec3 Normal;
+    layout(location = 8) vec2 TexCoords;
+    layout(location = 9) vec4 FragPosLightSpace;
+    layout(location = 10) vec3 cameraPos;
+    layout(location = 11) vec3 lightPos;
 } gs_in_shadow[];
 
 out GS_OUT_SHADOW {
-    vec3 FragPos;
-    vec3 Normal;
-    vec2 TexCoords;
-    vec4 FragPosLightSpace;
-    vec3 cameraPos;
-    vec3 lightPos;
+    layout(location = 6) vec3 FragPos;
+    layout(location = 7) vec3 Normal;
+    layout(location = 8) vec2 TexCoords;
+    layout(location = 9) vec4 FragPosLightSpace;
+    layout(location = 10) vec3 cameraPos;
+    layout(location = 11) vec3 lightPos;
 } gs_out_shadow;
 
-in vec3  v_reflectionPosition[];
-out vec3 g_reflectionPosition;
+layout(location = 12) in vec3  v_reflectionPosition[];
+layout(location = 12) out vec3 g_reflectionPosition;
 
-in vec3  v_reflectionNormal[];
-out vec3 g_reflectionNormal;
+layout(location = 13) in vec3  v_reflectionNormal[];
+layout(location = 13) out vec3 g_reflectionNormal;
 
-in vec3 v_tangentLightPos[];
-in vec3 v_tangentViewPos[];
-in vec3 v_tangentFragPos[];
-out vec3 g_tangentLightPos;
-out vec3 g_tangentViewPos;
-out vec3 g_tangentFragPos;
+layout(location = 14) in vec3 v_tangentLightPos[];
+layout(location = 15) in vec3 v_tangentViewPos[];
+layout(location = 16) in vec3 v_tangentFragPos[];
+layout(location = 14) out vec3 g_tangentLightPos;
+layout(location = 15) out vec3 g_tangentViewPos;
+layout(location = 16) out vec3 g_tangentFragPos;
 
-in float v_clipDistX[];
-in float v_clipDistY[];
-in float v_clipDistZ[];
-in float v_clipDist[];
+layout(location = 17) in float v_clipDistX[];
+layout(location = 18) in float v_clipDistY[];
+layout(location = 19) in float v_clipDistZ[];
+layout(location = 20) in float v_clipDist[];
 
-out float g_clipDistX;
-out float g_clipDistY;
-out float g_clipDistZ;
-out float g_clipDist;
+layout(location = 17) out float g_clipDistX;
+layout(location = 18) out float g_clipDistY;
+layout(location = 19) out float g_clipDistZ;
+layout(location = 20) out float g_clipDist;
 
 void main()
 {

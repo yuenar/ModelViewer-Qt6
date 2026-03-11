@@ -2,7 +2,7 @@
 
 uniform vec4 pickingColor;
 
-out vec4 fragColor;
+layout(location = 0) out vec4 fragColor;
 
 void main()
 {

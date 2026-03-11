@@ -3,26 +3,26 @@
 layout(lines) in;
 layout(line_strip, max_vertices=2) out;
 
-in vec3 v_position[];
-in vec3 v_normal[];
-in vec2 v_texCoord2d[];
+layout(location = 0) in vec3 v_position[];
+layout(location = 1) in vec3 v_normal[];
+layout(location = 2) in vec2 v_texCoord2d[];
 
-out vec3 g_normal;
-out vec3 g_position;
-out vec2 g_texCoord2d;
+layout(location = 0) out vec3 g_normal;
+layout(location = 1) out vec3 g_position;
+layout(location = 2) out vec2 g_texCoord2d;
 
-noperspective out vec3 g_edgeDistance;
+noperspective layout(location = 3) out vec3 g_edgeDistance;
 uniform mat4 viewportMatrix; // Viewport matrix
 
-in float clipDistX[];
-in float clipDistY[];
-in float clipDistZ[];
-in float clipDist[];
+layout(location = 4) in float clipDistX[];
+layout(location = 5) in float clipDistY[];
+layout(location = 6) in float clipDistZ[];
+layout(location = 7) in float clipDist[];
 
-out float g_clipDistX;
-out float g_clipDistY;
-out float g_clipDistZ;
-out float g_clipDist;
+layout(location = 4) out float g_clipDistX;
+layout(location = 5) out float g_clipDistY;
+layout(location = 6) out float g_clipDistZ;
+layout(location = 7) out float g_clipDist;
 
 void main()
 {	

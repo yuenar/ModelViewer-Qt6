@@ -1,10 +1,10 @@
-#version 460
+#version 450 core
 
-layout(location = 0) in vec2 inPosition;
+layout(location = 0) out vec2 v_uv;
 
-layout(location = 0) out float vY;
-
-void main() {
-    vY = inPosition.y;
-    gl_Position = vec4(inPosition, 0.0, 1.0);
+void main()
+{
+    uint idx = gl_VertexIndex;
+    gl_Position = vec4( idx & 1, idx >> 1, 0.0, 0.5 ) * 4.0 - 1.0;
+    v_uv = vec2( gl_Position.xy * 0.5 + 0.5 );
 }

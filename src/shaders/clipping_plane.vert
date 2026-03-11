@@ -1,13 +1,13 @@
 #version 450 core
 
 layout (location = 0) in vec3 vertexPosition;
-in vec2 texCoord2d;
+layout(location = 1) in vec2 texCoord2d;
 
 uniform mat4 modelMatrix;
 uniform mat4 viewMatrix;
 uniform mat4 projectionMatrix;
 
-out vec2 texCoord;
+layout(location = 0) out vec2 texCoord;
 
 void main()
 {

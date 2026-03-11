@@ -1,7 +1,7 @@
 #version 450 core
 
-out vec4 fragColor;
-in vec3 worldPos;
+layout(location = 0) out vec4 fragColor;
+layout(location = 0) in vec3 worldPos;
 
 uniform samplerCube environmentMap;
 

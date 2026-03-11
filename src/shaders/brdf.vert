@@ -3,7 +3,7 @@
 layout (location = 0) in vec3 vertexPosition;
 layout (location = 1) in vec2 texCoord2d;
 
-out vec2 texCoords;
+layout(location = 0) out vec2 texCoords;
 
 void main()
 {

@@ -21,30 +21,30 @@ uniform vec3 lightPos;
 // user defined clip plane
 uniform vec4 clipPlane;
 
-out float v_clipDistX;
-out float v_clipDistY;
-out float v_clipDistZ;
-out float v_clipDist;
+layout(location = 0) out float v_clipDistX;
+layout(location = 1) out float v_clipDistY;
+layout(location = 2) out float v_clipDistZ;
+layout(location = 3) out float v_clipDist;
 
-out vec3 v_normal;
-out vec3 v_position;
-out vec2 v_texCoord2d;
-out vec3 v_tangent;
-out vec3 v_bitangent;
-out vec3 v_tangentLightPos;
-out vec3 v_tangentViewPos;
-out vec3 v_tangentFragPos;
+layout(location = 4) out vec3 v_normal;
+layout(location = 5) out vec3 v_position;
+layout(location = 6) out vec2 v_texCoord2d;
+layout(location = 7) out vec3 v_tangent;
+layout(location = 8) out vec3 v_bitangent;
+layout(location = 9) out vec3 v_tangentLightPos;
+layout(location = 10) out vec3 v_tangentViewPos;
+layout(location = 11) out vec3 v_tangentFragPos;
 
-out vec3 v_reflectionPosition;
-out vec3 v_reflectionNormal;
+layout(location = 12) out vec3 v_reflectionPosition;
+layout(location = 13) out vec3 v_reflectionNormal;
 
 out VS_OUT_SHADOW {
-    vec3 FragPos;
-    vec3 Normal;
-    vec2 TexCoords;
-    vec4 FragPosLightSpace;
-    vec3 cameraPos;
-    vec3 lightPos;
+    layout(location = 14) vec3 FragPos;
+    layout(location = 15) vec3 Normal;
+    layout(location = 16) vec2 TexCoords;
+    layout(location = 17) vec4 FragPosLightSpace;
+    layout(location = 18) vec3 cameraPos;
+    layout(location = 19) vec3 lightPos;
 } vs_out_shadow;
 
 void main()

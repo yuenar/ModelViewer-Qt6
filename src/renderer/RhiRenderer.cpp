@@ -272,6 +272,12 @@ void RhiRenderer::render(QRhiCommandBuffer* cb,
     updates->updateDynamicBuffer(m_frameUBO,    0, sizeof(FrameUBOData),    &frameData);
     updates->updateDynamicBuffer(m_materialUBO, 0, sizeof(MaterialUBOData), &matData);
     
+    // 为normals模式添加normalLength更新
+    if (m_renderMode == 2) {
+        float normalLength = 0.1f;
+        updates->updateDynamicBuffer(m_normalsUBO, 0, sizeof(float), &normalLength);
+    }
+    
     const QColor clearColor(30, 30, 30);
     const QRhiDepthStencilClearValue dsv(1.0f, 0);
     
@@ -316,11 +322,6 @@ void RhiRenderer::render(QRhiCommandBuffer* cb,
         }
     } else if (m_renderMode == 2) {
         // Normals 模式
-        float normalLength = 0.1f;
-        auto* normalsUpdate = m_rhi->nextResourceUpdateBatch();
-        normalsUpdate->updateDynamicBuffer(m_normalsUBO, 0, sizeof(float), &normalLength);
-        cb->resourceUpdate(normalsUpdate);
-        
         cb->setGraphicsPipeline(m_normalsPipeline);
         cb->setShaderResources(m_normalsSrb);
         

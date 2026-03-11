@@ -2,8 +2,8 @@
 
 layout(location = 0) in vec3 vertexPosition;
 
-out vec3 texCoords;
-out vec3 worldPos;
+layout(location = 0) out vec3 texCoords;
+layout(location = 1) out vec3 worldPos;
 
 uniform mat4 projectionMatrix;
 uniform mat4 viewMatrix;

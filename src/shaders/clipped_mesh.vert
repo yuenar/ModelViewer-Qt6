@@ -12,10 +12,10 @@ uniform vec4 clipPlaneZ;
 // user defined clip plane
 uniform vec4 clipPlane;
 
-out float v_clipDistX;
-out float v_clipDistY;
-out float v_clipDistZ;
-out float v_clipDist;
+layout(location = 0) out float v_clipDistX;
+layout(location = 1) out float v_clipDistY;
+layout(location = 2) out float v_clipDistZ;
+layout(location = 3) out float v_clipDist;
 
 void main()
 {

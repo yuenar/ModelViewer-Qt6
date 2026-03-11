@@ -3,25 +3,25 @@
 layout (triangles) in;
 layout (line_strip, max_vertices = 6) out;
 
-in VS_OUT {
-    vec3 normal;
+layout(location = 0) in VS_OUT {
+    layout(location = 0) vec3 normal;
 } gs_in[];
 
 const float MAGNITUDE = 0.05;
 
-out vec3 g_normal;
-out vec3 g_position;
-out vec2 g_texCoord2d;
+layout(location = 0) out vec3 g_normal;
+layout(location = 1) out vec3 g_position;
+layout(location = 2) out vec2 g_texCoord2d;
 
-in float clipDistX[];
-in float clipDistY[];
-in float clipDistZ[];
-in float clipDist[];
+layout(location = 3) in float clipDistX[];
+layout(location = 4) in float clipDistY[];
+layout(location = 5) in float clipDistZ[];
+layout(location = 6) in float clipDist[];
 
-out float g_clipDistX;
-out float g_clipDistY;
-out float g_clipDistZ;
-out float g_clipDist;
+layout(location = 3) out float g_clipDistX;
+layout(location = 4) out float g_clipDistY;
+layout(location = 5) out float g_clipDistZ;
+layout(location = 6) out float g_clipDist;
 
 void main()
 {
