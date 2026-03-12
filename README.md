@@ -1,5 +1,309 @@
 # ModelViewer-Qt6
 
+[English](#english) | [中文](#中文)
+
+---
+
+## English
+
+A cross-platform 3D model viewer based on Qt6 RHI
+
+### Project Overview
+
+ModelViewer-Qt6 is a modern 3D model viewer that leverages Qt6's RHI (Rendering Hardware Interface) framework for cross-platform hardware-accelerated rendering. It supports multiple 3D model formats and provides rich rendering modes and interactive features. **Fully compatible with macOS, Windows, and Linux systems.**
+
+![Rendering Screenshot](screenshots/Screenshot%2021-07-24%20172616.jpg)
+
+### Key Features
+
+#### Core Functionality
+- **Multi-format Support**: Based on Assimp library, supports OBJ, FBX, GLTF, 3DS, DAE, STL and other mainstream 3D formats
+- **Cross-platform Rendering**: Supports OpenGL, DirectX, Vulkan, Metal and other graphics APIs through Qt RHI
+- **Hardware Acceleration**: Full GPU utilization for high-performance rendering
+- **Modern C++**: Uses C++17 standard and Google C++ coding conventions
+- **macOS Native Support**: Optimized for macOS with Metal backend support
+
+#### Rendering Modes
+- **Phong Shading**: Classic lighting model
+- **Wireframe Mode**: Display model mesh topology
+- **Normal Visualization**: Vertex and face normal display
+- **Flat Shading**: Unlit flat color rendering
+- **PBR Rendering**: Physically-based rendering
+- **Shadow Mapping**: Real-time shadow effects
+- **Skybox**: Environment background rendering
+- **Selection Highlight**: Object selection effects
+- **Clipping Plane**: Geometric clipping display
+- **Split Screen**: Multi-rendering mode comparison
+
+### Rendering Effects Gallery
+
+#### Basic Rendering
+![Basic Rendering](screenshots/Slide1.PNG)
+
+#### Advanced Rendering Modes
+![Advanced Rendering](screenshots/Slide2.PNG)
+
+#### Textures and Materials
+![Texture Rendering](screenshots/Slide3.PNG)
+
+#### Transparency and Reflection
+![Transparency Reflection](screenshots/Screenshot%2021-07-24%20150032.jpg)
+
+#### PBR Material Rendering
+![PBR Rendering](screenshots/Slide4.PNG)
+
+#### Skybox Environment
+![Skybox](screenshots/Slide5.PNG)
+
+#### Cross-section View
+![Cross-section](screenshots/Slide6.PNG)
+
+#### Multi Cross-section View
+![Multi Cross-section](screenshots/Slide7.PNG)
+
+#### Multiple Projection Modes
+![Multiple Projections](screenshots/Screenshot%2021-07-24%20223138.jpg)
+
+### Project Structure
+
+```
+ModelViewer-Qt6/
+├── src/                    # Source code directory
+│   ├── core/               # Core data structures
+│   │   ├── CpuMesh.h      # CPU-side mesh data
+│   │   ├── Light.h         # Light data structure
+│   │   └── Material.h      # Material data structure
+│   ├── loader/             # Model loader
+│   │   ├── ModelLoader.h    # Loader interface
+│   │   └── ModelLoader.cpp # Assimp implementation
+│   ├── math/               # Math library
+│   │   ├── BoundingBox.h   # Bounding box calculation
+│   │   ├── Camera.h        # Camera control
+│   │   ├── Camera.cpp
+│   │   ├── TrackBall.h     # Trackball controller
+│   │   └── TrackBall.cpp
+│   ├── renderer/           # Rendering engine
+│   │   ├── RhiMesh.h      # GPU mesh management
+│   │   ├── RhiMesh.cpp
+│   │   ├── RhiRenderer.h  # Main renderer
+│   │   └── RhiRenderer.cpp
+│   ├── ui/                 # User interface
+│   │   ├── MainWindow.h    # Main window
+│   │   ├── MainWindow.cpp
+│   │   ├── RhiWidget.h     # RHI rendering widget
+│   │   └── RhiWidget.cpp
+│   └── main.cpp           # Program entry point
+├── shaders/               # Shader files
+├── res/                  # Resource files
+├── textures/              # Texture resources
+├── fonts/                # Font files
+└── docs/                 # Documentation directory
+```
+
+### Technical Architecture
+
+#### Rendering Pipeline
+- **Qt RHI Abstraction Layer**: Unified graphics API interface
+- **Multi-pipeline Support**: Independent rendering pipeline for each rendering mode
+- **Unified Buffer Management**: Efficient GPU data management
+- **Shader System**: Automatic compilation and multi-platform support
+
+#### Data Flow
+```
+Model File → Assimp Loading → CpuMesh → RhiMesh → GPU Rendering
+```
+
+#### Interaction System
+- **Trackball Control**: Intuitive 3D rotation
+- **Camera System**: Perspective/orthographic projection switching
+- **View Fitting**: Automatically adjust viewport to include entire model
+- **Mouse Interaction**: Rotation, panning, zooming operations
+
+### Build Requirements
+
+#### System Requirements
+- **Operating System**: Windows 10+, macOS 10.15+, Linux (Ubuntu 18.04+)
+- **Compiler**: MSVC 2019+, GCC 8+, Clang 10+
+- **Graphics Driver**: OpenGL 4.3+ or DirectX 11+ support
+
+#### Dependencies
+- **Qt 6.9.3+**: GUI framework and RHI support
+- **Assimp 5.0+**: 3D model loading library
+- **CMake 3.20+**: Build system
+
+#### Build Instructions
+
+##### macOS (Recommended)
+```bash
+# 1. Install dependencies via Homebrew
+brew install qt@6 assimp cmake ninja
+
+# 2. Configure and build
+mkdir build && cd build
+cmake -DCMAKE_PREFIX_PATH=/opt/homebrew ..
+cmake --build . --config Release
+
+# 3. Run the application
+./ModelViewer
+```
+
+##### Windows (Visual Studio)
+```bash
+# 1. Install vcpkg
+git clone https://github.com/Microsoft/vcpkg.git
+cd vcpkg
+./bootstrap-vcpkg.bat
+
+# 2. Install dependencies
+vcpkg install qt6:x64-windows
+vcpkg install assimp:x64-windows
+
+# 3. Configure CMake
+cmake -B build -S . -DCMAKE_TOOLCHAIN_FILE=D:/vcpkg/scripts/buildsystems/vcpkg.cmake
+
+# 4. Build
+cmake --build build --config Release
+```
+
+##### Linux (Ubuntu/Debian)
+```bash
+# 1. Install dependencies
+sudo apt-get install qt6-base-dev qt6-tools-dev libassimp-dev cmake ninja-build
+
+# 2. Configure and build
+mkdir build && cd build
+cmake ..
+cmake --build . --config Release
+
+# 3. Run the application
+./ModelViewer
+```
+
+### Usage Guide
+
+#### Basic Operations
+1. **Open Model**: File → Open, select a supported 3D model file
+2. **View Control**:
+   - Left mouse drag: Rotate model
+   - Right mouse drag: Pan view
+   - Mouse wheel: Zoom view
+3. **Rendering Mode**: Switch different rendering effects from View menu
+4. **Projection Switch**: View → Projection Mode, toggle between perspective/orthographic
+
+#### Advanced Features
+- **Material Settings**: Tools → Material Settings, adjust lighting parameters
+- **Light Settings**: Tools → Light Settings, configure light source properties
+- **Background Settings**: Tools → Background Settings, customize background color
+- **Screenshot**: Tools → Screenshot, save current rendering frame
+
+#### Keyboard Shortcuts
+- `Space`: Reset view
+- `F`: Focus on selected object
+- `W`: Toggle wireframe mode
+- `N`: Show normals
+- `L`: Toggle lighting
+- `S`: Toggle shadows
+- `F11`: Fullscreen mode
+
+### Development Guide
+
+#### Code Standards
+- Follow Google C++ coding conventions
+- Use clear comments and detailed API documentation
+- Adopt modern C++ features (C++17)
+- RAII resource management
+
+#### Extension Development
+1. **Add New Rendering Mode**:
+   - Add enum value in `RhiRenderer.h`
+   - Implement corresponding `buildXXXPipeline()` method
+   - Create corresponding shader files
+
+2. **Support New Model Format**:
+   - Extend format list in `ModelLoader.cpp`
+   - Add specific data conversion logic
+
+3. **Custom UI Components**:
+   - Inherit from existing widget classes
+   - Use Qt signal-slot mechanism
+
+### Performance Optimization
+
+#### Rendering Optimization
+- **Batch Rendering**: Reduce draw calls
+- **Frustum Culling**: Avoid rendering invisible objects
+- **LOD System**: Distance-based level of detail
+- **Instanced Rendering**: Optimization for large numbers of identical objects
+
+#### Memory Management
+- **Object Pool**: Reuse temporary objects
+- **Deferred Release**: Safe GPU resource release
+- **Smart Pointers**: Automatic memory management
+
+### Troubleshooting
+
+#### Common Issues
+1. **Model Loading Failure**
+   - Check if file format is supported
+   - Verify file path is correct
+   - Check console error messages
+
+2. **Rendering Anomalies**
+   - Update graphics driver
+   - Check OpenGL/DirectX support
+   - Try different rendering modes
+
+3. **Compilation Errors**
+   - Verify dependency library versions
+   - Check CMake configuration
+   - Verify compiler version
+
+#### Debugging Tips
+- Use Qt Creator debugger
+- Enable RHI debug layer
+- Check shader compilation logs
+- Monitor GPU memory usage
+
+### Contributing Guidelines
+
+#### Commit Standards
+- Use clear commit messages
+- Follow existing code style
+- Add appropriate tests
+- Update relevant documentation
+
+#### Development Workflow
+1. Fork the project repository
+2. Create a feature branch
+3. Develop and test
+4. Submit Pull Request
+
+### License
+
+This project is licensed under the Apache License 2.0. See [LICENSE](LICENSE) file for details.
+
+### Acknowledgments
+
+- **Qt Team**: Excellent cross-platform framework
+- **Assimp Team**: Powerful 3D model loading library
+- **Open Source Community**: Support from various tools and libraries
+
+### Contact
+
+- **Project Homepage**: https://github.com/yuenar/ModelViewer-Qt6
+- **Issue Tracking**: GitHub Issues
+- **Documentation**: Detailed documentation in docs/ directory
+
+---
+
+**Thank you for using ModelViewer-Qt6!** 🎉
+
+If this project is helpful to you, please consider giving us a ⭐ Star!
+
+---
+
+## 中文
+
 基于 Qt6 RHI 的跨平台 3D 模型查看器
 
 ## 项目简介
