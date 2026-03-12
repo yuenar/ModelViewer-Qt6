@@ -11,6 +11,7 @@
 #include <QVBoxLayout>
 #include <QWidget>
 #include <QDebug>
+#include <QtMath>
 
 MainWindow::MainWindow(QWidget* parent)
     : QMainWindow(parent)
@@ -26,6 +27,9 @@ MainWindow::MainWindow(QWidget* parent)
 void MainWindow::setupUI() {
     m_rhiWidget = new RhiWidget(this);
     setCentralWidget(m_rhiWidget);
+    
+    // 设置焦点到 RhiWidget，使其能够接收键盘事件
+    m_rhiWidget->setFocus();
 }
 
 void MainWindow::setupMenus() {
@@ -405,58 +409,66 @@ void MainWindow::onToggleSplitScreen() {
 
 void MainWindow::onViewFront() {
     // 前视图：沿 Z 轴看向模型
-    m_rhiWidget->getCamera().setPosition(QVector3D(0, 0, 10));
-    m_rhiWidget->getCamera().setTarget(QVector3D(0, 0, 0));
-    m_rhiWidget->getCamera().setUp(QVector3D(0, 1, 0));
-    m_rhiWidget->update();
+    Camera& camera = m_rhiWidget->getCamera();
+    // 使用 fitToView 逻辑来计算合适的距离
+    camera.setTarget(QVector3D(0, 0, 0));
+    camera.setPosition(QVector3D(0, 0, 10));
+    camera.setUp(QVector3D(0, 1, 0));
+    m_rhiWidget->fitToView();
 }
 
 void MainWindow::onViewBack() {
     // 后视图：沿 -Z 轴看向模型
-    m_rhiWidget->getCamera().setPosition(QVector3D(0, 0, -10));
-    m_rhiWidget->getCamera().setTarget(QVector3D(0, 0, 0));
-    m_rhiWidget->getCamera().setUp(QVector3D(0, 1, 0));
-    m_rhiWidget->update();
+    Camera& camera = m_rhiWidget->getCamera();
+    camera.setTarget(QVector3D(0, 0, 0));
+    camera.setPosition(QVector3D(0, 0, -10));
+    camera.setUp(QVector3D(0, 1, 0));
+    m_rhiWidget->fitToView();
 }
 
 void MainWindow::onViewLeft() {
     // 左视图：沿 X 轴看向模型
-    m_rhiWidget->getCamera().setPosition(QVector3D(-10, 0, 0));
-    m_rhiWidget->getCamera().setTarget(QVector3D(0, 0, 0));
-    m_rhiWidget->getCamera().setUp(QVector3D(0, 1, 0));
-    m_rhiWidget->update();
+    Camera& camera = m_rhiWidget->getCamera();
+    camera.setTarget(QVector3D(0, 0, 0));
+    camera.setPosition(QVector3D(-10, 0, 0));
+    camera.setUp(QVector3D(0, 1, 0));
+    m_rhiWidget->fitToView();
 }
 
 void MainWindow::onViewRight() {
     // 右视图：沿 -X 轴看向模型
-    m_rhiWidget->getCamera().setPosition(QVector3D(10, 0, 0));
-    m_rhiWidget->getCamera().setTarget(QVector3D(0, 0, 0));
-    m_rhiWidget->getCamera().setUp(QVector3D(0, 1, 0));
-    m_rhiWidget->update();
+    Camera& camera = m_rhiWidget->getCamera();
+    camera.setTarget(QVector3D(0, 0, 0));
+    camera.setPosition(QVector3D(10, 0, 0));
+    camera.setUp(QVector3D(0, 1, 0));
+    m_rhiWidget->fitToView();
 }
 
 void MainWindow::onViewTop() {
-    // 顶视图：沿 -Y 轴看向模型
-    m_rhiWidget->getCamera().setPosition(QVector3D(0, 10, 0));
-    m_rhiWidget->getCamera().setTarget(QVector3D(0, 0, 0));
-    m_rhiWidget->getCamera().setUp(QVector3D(0, 0, -1));
-    m_rhiWidget->update();
+    // 顶视图：从上往下看
+    Camera& camera = m_rhiWidget->getCamera();
+    camera.setTarget(QVector3D(0, 0, 0));
+    camera.setPosition(QVector3D(0, 10, 0));
+    camera.setUp(QVector3D(0, 0, 1));  // 使用 Z 轴作为上向量
+    m_rhiWidget->fitToView();
 }
 
 void MainWindow::onViewBottom() {
-    // 底视图：沿 Y 轴看向模型
-    m_rhiWidget->getCamera().setPosition(QVector3D(0, -10, 0));
-    m_rhiWidget->getCamera().setTarget(QVector3D(0, 0, 0));
-    m_rhiWidget->getCamera().setUp(QVector3D(0, 0, 1));
-    m_rhiWidget->update();
+    // 底视图：从下往上看
+    Camera& camera = m_rhiWidget->getCamera();
+    camera.setTarget(QVector3D(0, 0, 0));
+    camera.setPosition(QVector3D(0, -10, 0));
+    camera.setUp(QVector3D(0, 0, -1));  // 使用 -Z 轴作为上向量
+    m_rhiWidget->fitToView();
 }
 
 void MainWindow::onViewIsometric() {
     // 等轴测视图：45 度角观看
-    m_rhiWidget->getCamera().setPosition(QVector3D(10, 10, 10));
-    m_rhiWidget->getCamera().setTarget(QVector3D(0, 0, 0));
-    m_rhiWidget->getCamera().setUp(QVector3D(0, 1, 0));
-    m_rhiWidget->update();
+    Camera& camera = m_rhiWidget->getCamera();
+    camera.setTarget(QVector3D(0, 0, 0));
+    camera.setPosition(QVector3D(10, 10, 10));
+    camera.setUp(QVector3D(0, 1, 0));
+    m_rhiWidget->fitToView();
 }
 
 
