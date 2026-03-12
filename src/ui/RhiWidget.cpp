@@ -287,27 +287,31 @@ QString RhiWidget::getModelStatistics() const {
     
     uint32_t triangles = totalIndices / 3;
     
+    QVector3D minPt = m_sceneBbox.min();
+    QVector3D maxPt = m_sceneBbox.max();
+    QVector3D sizePt = maxPt - minPt;
+    
     QString stats = QString(
         "Model Statistics:\n"
         "Meshes: %1\n"
         "Vertices: %2\n"
         "Triangles: %3\n"
         "Bounding Box:\n"
-        "  Min: (%.2f, %.2f, %.2f)\n"
-        "  Max: (%.2f, %.2f, %.2f)\n"
-        "  Size: (%.2f, %.2f, %.2f)"
+        "  Min: (%4, %5, %6)\n"
+        "  Max: (%7, %8, %9)\n"
+        "  Size: (%10, %11, %12)"
     ).arg(m_meshes.size())
      .arg(totalVertices)
      .arg(triangles)
-     .arg(m_sceneBbox.min().x(), 0, 'f', 2)
-     .arg(m_sceneBbox.min().y(), 0, 'f', 2)
-     .arg(m_sceneBbox.min().z(), 0, 'f', 2)
-     .arg(m_sceneBbox.max().x(), 0, 'f', 2)
-     .arg(m_sceneBbox.max().y(), 0, 'f', 2)
-     .arg(m_sceneBbox.max().z(), 0, 'f', 2)
-     .arg(m_sceneBbox.max().x() - m_sceneBbox.min().x(), 0, 'f', 2)
-     .arg(m_sceneBbox.max().y() - m_sceneBbox.min().y(), 0, 'f', 2)
-     .arg(m_sceneBbox.max().z() - m_sceneBbox.min().z(), 0, 'f', 2);
+     .arg(QString::number(minPt.x(), 'f', 2))
+     .arg(QString::number(minPt.y(), 'f', 2))
+     .arg(QString::number(minPt.z(), 'f', 2))
+     .arg(QString::number(maxPt.x(), 'f', 2))
+     .arg(QString::number(maxPt.y(), 'f', 2))
+     .arg(QString::number(maxPt.z(), 'f', 2))
+     .arg(QString::number(sizePt.x(), 'f', 2))
+     .arg(QString::number(sizePt.y(), 'f', 2))
+     .arg(QString::number(sizePt.z(), 'f', 2));
     
     return stats;
 }

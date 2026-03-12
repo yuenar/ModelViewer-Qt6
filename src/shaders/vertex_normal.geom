@@ -13,6 +13,7 @@ layout(location = 0) out vec3 g_normal;
 layout(location = 1) out vec3 g_position;
 layout(location = 2) out vec2 g_texCoord2d;
 
+// clip distance 通过自定义 varying 传递（HLSL 不支持 gl_ClipDistance 内建变量）
 layout(location = 3) in float clipDistX[];
 layout(location = 4) in float clipDistY[];
 layout(location = 5) in float clipDistZ[];
@@ -25,28 +26,21 @@ layout(location = 6) out float g_clipDist;
 
 void GenerateLine(int index)
 {
-    gl_Position = gl_in[index].gl_Position;
-    g_clipDistX = clipDistX[index];
-    g_clipDistY = clipDistY[index];
-    g_clipDistZ = clipDistZ[index];
-    g_clipDist = clipDist[index];
-
-    gl_ClipDistance[0] = g_clipDistX;
-    gl_ClipDistance[1] = g_clipDistY;
-    gl_ClipDistance[2] = g_clipDistZ;
-    gl_ClipDistance[3] = g_clipDist;
+    // ── 顶点原始位置 ─────────────────────────────────────────────────────
+    gl_Position  = gl_in[index].gl_Position;
+    g_clipDistX  = clipDistX[index];
+    g_clipDistY  = clipDistY[index];
+    g_clipDistZ  = clipDistZ[index];
+    g_clipDist   = clipDist[index];
+    // 移除 gl_ClipDistance[] 写入：SPIRV-Cross 无法将此内建变量转译到 HLSL/MSL
     EmitVertex();
 
-    gl_Position = gl_in[index].gl_Position + vec4(gs_in[index].normal, 0.0) * MAGNITUDE;
-    g_clipDistX = clipDistX[index];
-    g_clipDistY = clipDistY[index];
-    g_clipDistZ = clipDistZ[index];
-    g_clipDist = clipDist[index];
-
-    gl_ClipDistance[0] = g_clipDistX;
-    gl_ClipDistance[1] = g_clipDistY;
-    gl_ClipDistance[2] = g_clipDistZ;
-    gl_ClipDistance[3] = g_clipDist;
+    // ── 法线方向端点 ─────────────────────────────────────────────────────
+    gl_Position  = gl_in[index].gl_Position + vec4(gs_in[index].normal, 0.0) * MAGNITUDE;
+    g_clipDistX  = clipDistX[index];
+    g_clipDistY  = clipDistY[index];
+    g_clipDistZ  = clipDistZ[index];
+    g_clipDist   = clipDist[index];
     EmitVertex();
 
     EndPrimitive();
@@ -54,7 +48,7 @@ void GenerateLine(int index)
 
 void main()
 {
-    GenerateLine(0); // first vertex normal
-    GenerateLine(1); // second vertex normal
-    GenerateLine(2); // third vertex normal
+    GenerateLine(0);
+    GenerateLine(1);
+    GenerateLine(2);
 }
