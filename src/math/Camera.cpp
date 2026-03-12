@@ -11,7 +11,7 @@ Camera::~Camera() {
 
 QMatrix4x4 Camera::viewMatrix() const {
     QMatrix4x4 view;
-    view.lookAt(m_eye, m_pivot, {0, 1, 0});
+    view.lookAt(m_eye, m_pivot, m_up);
     
     // 应用轨迹球旋转
     QMatrix4x4 rot;
@@ -84,5 +84,26 @@ void Camera::fitToView(const BoundingBox& bbox) {
     const float distance = radius / qSin(qDegreesToRadians(m_fov * 0.5f));
     m_eye = m_pivot + QVector3D(0, 0, distance);
     
+    m_trackball->reset();
+}
+
+
+void Camera::setPosition(const QVector3D& pos) {
+    m_eye = pos;
+    m_trackball->reset();
+}
+
+void Camera::setTarget(const QVector3D& target) {
+    m_pivot = target;
+}
+
+void Camera::setUp(const QVector3D& up) {
+    m_up = up.normalized();
+}
+
+void Camera::reset() {
+    m_eye = QVector3D(0, 0, 5);
+    m_pivot = QVector3D(0, 0, 0);
+    m_up = QVector3D(0, 1, 0);
     m_trackball->reset();
 }

@@ -5,6 +5,7 @@
 #include "../math/Camera.h"
 #include <QMouseEvent>
 #include <QWheelEvent>
+#include <QKeyEvent>
 #include <QFileDialog>
 
 RhiWidget::RhiWidget(QWidget* parent)
@@ -160,4 +161,153 @@ void RhiWidget::toggleProjection() {
                   : ProjectionType::Perspective;
     m_camera.setProjectionType(currentType);
     update();
+}
+
+void RhiWidget::keyPressEvent(QKeyEvent* e) {
+    if (e->isAutoRepeat()) {
+        e->ignore();
+        return;
+    }
+    
+    switch (e->key()) {
+        case Qt::Key_F:
+            // F：聚焦视图
+            fitToView();
+            e->accept();
+            break;
+            
+        case Qt::Key_Space:
+            // Space：重置视图
+            m_camera.reset();
+            update();
+            e->accept();
+            break;
+            
+        case Qt::Key_W:
+            // W：切换线框模式
+            if (m_renderer) {
+                static int mode = 0;
+                mode = (mode == 1) ? 0 : 1;
+                setRenderMode(mode);
+            }
+            e->accept();
+            break;
+            
+        case Qt::Key_N:
+            // N：显示法线
+            if (m_renderer) {
+                static int mode = 0;
+                mode = (mode == 2) ? 0 : 2;
+                setRenderMode(mode);
+            }
+            e->accept();
+            break;
+            
+        case Qt::Key_L:
+            // L：切换光照（在 Phong 和 Wireframe 之间切换）
+            if (m_renderer) {
+                static int mode = 0;
+                mode = (mode == 0) ? 1 : 0;
+                setRenderMode(mode);
+            }
+            e->accept();
+            break;
+            
+        case Qt::Key_S:
+            // S：切换阴影（切换到阴影映射模式）
+            if (m_renderer) {
+                static int mode = 0;
+                mode = (mode == 7) ? 0 : 7;
+                setRenderMode(mode);
+            }
+            e->accept();
+            break;
+            
+        case Qt::Key_P:
+            // P：切换投影
+            toggleProjection();
+            e->accept();
+            break;
+            
+        case Qt::Key_F11:
+            // F11：全屏模式
+            if (window()->isFullScreen()) {
+                window()->showNormal();
+            } else {
+                window()->showFullScreen();
+            }
+            e->accept();
+            break;
+            
+        default:
+            QRhiWidget::keyPressEvent(e);
+            break;
+    }
+}
+
+
+bool RhiWidget::saveScreenshotEx(const QString& filePath, const QString& format, int quality) {
+    QImage image = grabFramebuffer();
+    if (image.isNull()) {
+        qWarning() << "Failed to grab framebuffer";
+        return false;
+    }
+    
+    bool success = false;
+    if (format.toLower() == "jpg" || format.toLower() == "jpeg") {
+        success = image.save(filePath, "JPEG", quality);
+    } else {
+        success = image.save(filePath, format.toUpper().toStdString().c_str());
+    }
+    
+    if (!success) {
+        qWarning() << "Failed to save screenshot to" << filePath;
+    } else {
+        qDebug() << "Screenshot saved to" << filePath << "with format" << format;
+    }
+    
+    return success;
+}
+
+
+QString RhiWidget::getModelStatistics() const {
+    if (m_meshes.isEmpty()) {
+        return "No model loaded";
+    }
+    
+    uint32_t totalVertices = 0;
+    uint32_t totalIndices = 0;
+    
+    for (const auto* mesh : m_meshes) {
+        if (mesh) {
+            totalVertices += mesh->vertexCount();
+            totalIndices += mesh->indexCount();
+        }
+    }
+    
+    uint32_t triangles = totalIndices / 3;
+    
+    QString stats = QString(
+        "Model Statistics:\n"
+        "Meshes: %1\n"
+        "Vertices: %2\n"
+        "Triangles: %3\n"
+        "Bounding Box:\n"
+        "  Min: (%.2f, %.2f, %.2f)\n"
+        "  Max: (%.2f, %.2f, %.2f)\n"
+        "  Size: (%.2f, %.2f, %.2f)"
+    ).arg(m_meshes.size())
+     .arg(totalVertices)
+     .arg(triangles)
+     .arg(m_sceneBbox.min().x(), 0, 'f', 2)
+     .arg(m_sceneBbox.min().y(), 0, 'f', 2)
+     .arg(m_sceneBbox.min().z(), 0, 'f', 2)
+     .arg(m_sceneBbox.max().x(), 0, 'f', 2)
+     .arg(m_sceneBbox.max().y(), 0, 'f', 2)
+     .arg(m_sceneBbox.max().z(), 0, 'f', 2)
+     .arg(m_sceneBbox.max().x() - m_sceneBbox.min().x(), 0, 'f', 2)
+     .arg(m_sceneBbox.max().y() - m_sceneBbox.min().y(), 0, 'f', 2)
+     .arg(m_sceneBbox.max().z() - m_sceneBbox.min().z(), 0, 'f', 2);
+    
+    return stats;
 }

@@ -1,4 +1,4 @@
-// Copyright 2024 ModelViewer Project
+// Copyright 2026 ModelViewer Project
 // 
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -154,6 +154,30 @@ class MainWindow : public QMainWindow {
   /// 
   /// 响应"工具->背景设置"菜单项，打开背景颜色编辑对话框。
   void onBackgroundSettings();
+  
+  /// @brief 视图预设 - 前视图
+  void onViewFront();
+  
+  /// @brief 视图预设 - 后视图
+  void onViewBack();
+  
+  /// @brief 视图预设 - 左视图
+  void onViewLeft();
+  
+  /// @brief 视图预设 - 右视图
+  void onViewRight();
+  
+  /// @brief 视图预设 - 顶视图
+  void onViewTop();
+  
+  /// @brief 视图预设 - 底视图
+  void onViewBottom();
+  
+  /// @brief 视图预设 - 等轴测视图
+  void onViewIsometric();
+  
+  /// @brief 显示模型信息
+  void onShowModelInfo();
   
  private:
   /// @brief 设置用户界面

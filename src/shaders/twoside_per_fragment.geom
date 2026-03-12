@@ -17,7 +17,7 @@ layout(location = 4) out vec3 g_bitangent;
 
 layout(location = 5) out vec3 g_edgeDistance;
 
-layout(std140, binding = 0) uniform TwoSideGeomUBO {
+layout(std140, set = 0, binding = 0) uniform TwoSideGeomUBO {
     mat4 viewportMatrix;
     int displayMode;
     float _p0;

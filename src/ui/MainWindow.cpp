@@ -4,6 +4,8 @@
 #include "LightDialog.h"
 #include <QFileDialog>
 #include <QColorDialog>
+#include <QInputDialog>
+#include <QFileInfo>
 #include <QMessageBox>
 #include <QMenuBar>
 #include <QVBoxLayout>
@@ -99,6 +101,38 @@ void MainWindow::setupMenus() {
     m_actionOrtho->setCheckable(true);
     connect(m_actionOrtho, &QAction::toggled, this, &MainWindow::onToggleProjection);
     
+    viewMenu->addSeparator();
+    
+    auto* viewPresetsMenu = viewMenu->addMenu("&View Presets");
+    
+    auto* frontAction = viewPresetsMenu->addAction("&Front");
+    frontAction->setShortcut(QKeySequence("1"));
+    connect(frontAction, &QAction::triggered, this, &MainWindow::onViewFront);
+    
+    auto* backAction = viewPresetsMenu->addAction("&Back");
+    backAction->setShortcut(QKeySequence("2"));
+    connect(backAction, &QAction::triggered, this, &MainWindow::onViewBack);
+    
+    auto* leftAction = viewPresetsMenu->addAction("&Left");
+    leftAction->setShortcut(QKeySequence("3"));
+    connect(leftAction, &QAction::triggered, this, &MainWindow::onViewLeft);
+    
+    auto* rightAction = viewPresetsMenu->addAction("&Right");
+    rightAction->setShortcut(QKeySequence("4"));
+    connect(rightAction, &QAction::triggered, this, &MainWindow::onViewRight);
+    
+    auto* topAction = viewPresetsMenu->addAction("&Top");
+    topAction->setShortcut(QKeySequence("5"));
+    connect(topAction, &QAction::triggered, this, &MainWindow::onViewTop);
+    
+    auto* bottomAction = viewPresetsMenu->addAction("&Bottom");
+    bottomAction->setShortcut(QKeySequence("6"));
+    connect(bottomAction, &QAction::triggered, this, &MainWindow::onViewBottom);
+    
+    auto* isometricAction = viewPresetsMenu->addAction("&Isometric");
+    isometricAction->setShortcut(QKeySequence("7"));
+    connect(isometricAction, &QAction::triggered, this, &MainWindow::onViewIsometric);
+    
     auto* toolsMenu = menuBar()->addMenu("&Tools");
     
     auto* materialAction = toolsMenu->addAction("&Material Settings...");
@@ -115,6 +149,9 @@ void MainWindow::setupMenus() {
     auto* screenshotAction = toolsMenu->addAction("&Screenshot...");
     screenshotAction->setShortcut(QKeySequence("F12"));
     connect(screenshotAction, &QAction::triggered, this, &MainWindow::onScreenshot);
+    
+    auto* modelInfoAction = toolsMenu->addAction("&Model Information...");
+    connect(modelInfoAction, &QAction::triggered, this, &MainWindow::onShowModelInfo);
 }
 
 void MainWindow::setupConnections() {
@@ -218,12 +255,29 @@ void MainWindow::onScreenshot() {
         this,
         "Save Screenshot",
         QString(),
-        "PNG Files (*.png);;JPEG Files (*.jpg);;All Files (*)"
+        "PNG Files (*.png);;JPEG Files (*.jpg);;BMP Files (*.bmp);;All Files (*)"
     );
     
-    if (!path.isEmpty()) {
-        m_rhiWidget->saveScreenshot(path);
+    if (path.isEmpty()) return;
+    
+    // 获取文件扩展名
+    QString format = QFileInfo(path).suffix().toLower();
+    if (format.isEmpty()) format = "png";
+    
+    // 对于 JPEG，可以选择质量
+    int quality = 95;
+    if (format == "jpg" || format == "jpeg") {
+        bool ok;
+        quality = QInputDialog::getInt(
+            this,
+            "JPEG Quality",
+            "Select quality (0-100):",
+            95, 0, 100, 1, &ok
+        );
+        if (!ok) return;
     }
+    
+    m_rhiWidget->saveScreenshotEx(path, format, quality);
 }
 
 void MainWindow::onBackgroundSettings() {
@@ -347,4 +401,66 @@ void MainWindow::onToggleSplitScreen() {
     } else {
         m_rhiWidget->setRenderMode(0);
     }
+}
+
+void MainWindow::onViewFront() {
+    // 前视图：沿 Z 轴看向模型
+    m_rhiWidget->getCamera().setPosition(QVector3D(0, 0, 10));
+    m_rhiWidget->getCamera().setTarget(QVector3D(0, 0, 0));
+    m_rhiWidget->getCamera().setUp(QVector3D(0, 1, 0));
+    m_rhiWidget->update();
+}
+
+void MainWindow::onViewBack() {
+    // 后视图：沿 -Z 轴看向模型
+    m_rhiWidget->getCamera().setPosition(QVector3D(0, 0, -10));
+    m_rhiWidget->getCamera().setTarget(QVector3D(0, 0, 0));
+    m_rhiWidget->getCamera().setUp(QVector3D(0, 1, 0));
+    m_rhiWidget->update();
+}
+
+void MainWindow::onViewLeft() {
+    // 左视图：沿 X 轴看向模型
+    m_rhiWidget->getCamera().setPosition(QVector3D(-10, 0, 0));
+    m_rhiWidget->getCamera().setTarget(QVector3D(0, 0, 0));
+    m_rhiWidget->getCamera().setUp(QVector3D(0, 1, 0));
+    m_rhiWidget->update();
+}
+
+void MainWindow::onViewRight() {
+    // 右视图：沿 -X 轴看向模型
+    m_rhiWidget->getCamera().setPosition(QVector3D(10, 0, 0));
+    m_rhiWidget->getCamera().setTarget(QVector3D(0, 0, 0));
+    m_rhiWidget->getCamera().setUp(QVector3D(0, 1, 0));
+    m_rhiWidget->update();
+}
+
+void MainWindow::onViewTop() {
+    // 顶视图：沿 -Y 轴看向模型
+    m_rhiWidget->getCamera().setPosition(QVector3D(0, 10, 0));
+    m_rhiWidget->getCamera().setTarget(QVector3D(0, 0, 0));
+    m_rhiWidget->getCamera().setUp(QVector3D(0, 0, -1));
+    m_rhiWidget->update();
+}
+
+void MainWindow::onViewBottom() {
+    // 底视图：沿 Y 轴看向模型
+    m_rhiWidget->getCamera().setPosition(QVector3D(0, -10, 0));
+    m_rhiWidget->getCamera().setTarget(QVector3D(0, 0, 0));
+    m_rhiWidget->getCamera().setUp(QVector3D(0, 0, 1));
+    m_rhiWidget->update();
+}
+
+void MainWindow::onViewIsometric() {
+    // 等轴测视图：45 度角观看
+    m_rhiWidget->getCamera().setPosition(QVector3D(10, 10, 10));
+    m_rhiWidget->getCamera().setTarget(QVector3D(0, 0, 0));
+    m_rhiWidget->getCamera().setUp(QVector3D(0, 1, 0));
+    m_rhiWidget->update();
+}
+
+
+void MainWindow::onShowModelInfo() {
+    QString info = m_rhiWidget->getModelStatistics();
+    QMessageBox::information(this, "Model Information", info);
 }

@@ -3,14 +3,14 @@ layout (triangles) in;
 layout (triangle_strip, max_vertices=256) out; 
 
 //uniforms
-layout(std140, binding = 0) uniform SubdivUBO {
+layout(std140, set = 0, binding = 0) uniform SubdivUBO {
     int sub_divisions;
     float _p0;
     float _p1;
     float _p2;
 };
 
-in mat4 MVP[];					//combined view projection matrix
+layout(location = 0) in mat4 MVP[];					//combined view projection matrix
 
 void main()
 {

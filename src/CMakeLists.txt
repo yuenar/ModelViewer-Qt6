@@ -71,14 +71,19 @@ qt_add_shaders(ModelViewer "shaders"
         shaders/wireframe.frag
         shaders/normals.vert
         shaders/normals.frag
+        shaders/normals.geom
         shaders/background.vert
         shaders/background.frag
         shaders/face_normal.vert
         shaders/face_normal.frag
+        shaders/face_normal.geom
+        shaders/facenormal.geom
         shaders/vertex_normal.vert
         shaders/vertex_normal.frag
+        shaders/vertex_normal.geom
         shaders/axis.vert
         shaders/axis.frag
+        shaders/axis.geom
         shaders/clipped_mesh.vert
         shaders/clipped_mesh.frag
         shaders/clipping_plane.vert
@@ -96,6 +101,8 @@ qt_add_shaders(ModelViewer "shaders"
         shaders/skybox.frag
         shaders/splitScreen.vert
         shaders/splitScreen.frag
+        shaders/twoside_per_fragment.geom
+        shaders/subdiv.geom
         shaders/text.vert
         shaders/text.frag
         shaders/brdf.vert

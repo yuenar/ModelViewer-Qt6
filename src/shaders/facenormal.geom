@@ -2,7 +2,7 @@
 layout(triangles) in;
 layout(line_strip, max_vertices=8) out;
 
-layout(std140, binding = 0) uniform FaceNormalUBO {
+layout(std140, set = 0, binding = 0) uniform FaceNormalUBO {
     float normal_length;
     float _p0;
     float _p1;
@@ -11,10 +11,10 @@ layout(std140, binding = 0) uniform FaceNormalUBO {
 
 in mat4 MVP[];
 
-in Vertex
+layout(location = 0) in Vertex
 {
-    vec4 normal;
-    vec4 color;
+    layout(location = 0) vec4 normal;
+    layout(location = 1) vec4 color;
 } vertex[];
 
 layout(location = 0) out vec4 v_color;
