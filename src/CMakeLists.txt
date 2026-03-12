@@ -1,7 +1,10 @@
-# 设置 vcpkg 工具链（必须在 project() 之前）
-set(CMAKE_TOOLCHAIN_FILE "D:/vcpkg/scripts/buildsystems/vcpkg.cmake" CACHE STRING "")
-
 cmake_minimum_required(VERSION 3.20)
+
+# 仅在 Windows 且文件存在时设置 vcpkg 工具链
+if(WIN32 AND EXISTS "D:/vcpkg/scripts/buildsystems/vcpkg.cmake")
+    set(CMAKE_TOOLCHAIN_FILE "D:/vcpkg/scripts/buildsystems/vcpkg.cmake" CACHE FILEPATH "vcpkg toolchain" FORCE)
+endif()
+
 project(ModelViewer VERSION 1.0.0 LANGUAGES CXX)
 
 # 设置 C++ 标准和编译器选项
@@ -9,21 +12,20 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
-
-# 强制设置 vcpkg 工具链（必须在 project() 之前）
-if(WIN32 AND NOT CMAKE_TOOLCHAIN_FILE)
-    set(CMAKE_TOOLCHAIN_FILE "D:/vcpkg/scripts/buildsystems/vcpkg.cmake" CACHE FILEPATH "vcpkg toolchain" FORCE)
-endif()
-
-# 添加 vcpkg 到 CMAKE_PREFIX_PATH
+# 平台特定的 PREFIX_PATH 配置
 if(WIN32)
     list(APPEND CMAKE_PREFIX_PATH "D:/vcpkg/installed/x64-windows")
     list(APPEND CMAKE_PREFIX_PATH "D:/Qt/6.9.3/msvc2022_64")
+elseif(APPLE)
+    # macOS: 使用 Homebrew
+    list(APPEND CMAKE_PREFIX_PATH "/opt/homebrew")
 endif()
 
 # 查找 Qt6
 find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Qml Quick QuickControls2 ShaderTools)
 
+# 查找 OpenMP（可选）
+find_package(OpenMP QUIET)
 
 # assimp
 find_package(assimp CONFIG REQUIRED)
@@ -116,3 +118,8 @@ target_link_libraries(ModelViewer PRIVATE
     Qt6::Core Qt6::Gui Qt6::Widgets Qt6::GuiPrivate Qt6::Qml Qt6::Quick Qt6::QuickControls2 Qt6::ShaderTools
     assimp::assimp
 )
+
+# 如果找到 OpenMP，链接它
+if(OpenMP_CXX_FOUND)
+    target_link_libraries(ModelViewer PRIVATE OpenMP::OpenMP_CXX)
+endif()

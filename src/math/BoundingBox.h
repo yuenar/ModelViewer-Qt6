@@ -17,6 +17,7 @@
 
 #include <QVector3D>
 #include <cmath>
+#include <cfloat>
 
 /// @brief 轴对齐包围盒（AABB - Axis-Aligned Bounding Box）类
 /// 
