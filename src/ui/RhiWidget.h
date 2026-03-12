@@ -1,4 +1,4 @@
-// Copyright 2024 ModelViewer Project
+// Copyright 2026 ModelViewer Project
 // 
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -143,6 +143,29 @@ class RhiWidget : public QRhiWidget {
   /// 透视投影模拟人眼视觉效果，正交投影保持实际比例。
   void toggleProjection();
   
+  /// @brief 获取摄像机对象
+  /// 
+  /// @return Camera& 摄像机对象的引用
+  Camera& getCamera() { return m_camera; }
+  
+  /// @brief 保存当前渲染画面为截图（增强版）
+  /// 
+  /// 将当前帧缓冲区内容保存为图片文件，支持多种格式。
+  /// 
+  /// @param[in] filePath 保存文件的完整路径
+  /// @param[in] format 图片格式（"png", "jpg", "bmp" 等）
+  /// @param[in] quality JPEG 质量（0-100，仅对 JPEG 有效）
+  /// 
+  /// @return bool 保存是否成功
+  bool saveScreenshotEx(const QString& filePath, const QString& format = "png", int quality = 95);
+  
+  /// @brief 获取模型统计信息
+  /// 
+  /// 返回当前加载模型的统计信息，包括顶点数、三角形数等。
+  /// 
+  /// @return QString 格式化的统计信息字符串
+  QString getModelStatistics() const;
+  
  protected:
   /// @brief 初始化渲染资源
   /// 
@@ -189,6 +212,21 @@ class RhiWidget : public QRhiWidget {
   /// 
   /// @param[in] e 滚轮事件对象
   void wheelEvent(QWheelEvent*) override;
+  
+  /// @brief 键盘按键事件处理
+  /// 
+  /// 处理快捷键操作：
+  /// - F：聚焦视图
+  /// - Space：重置视图
+  /// - W：切换线框模式
+  /// - N：显示法线
+  /// - L：切换光照
+  /// - S：切换阴影
+  /// - P：切换投影
+  /// - F11：全屏模式
+  /// 
+  /// @param[in] e 键盘事件对象
+  void keyPressEvent(QKeyEvent*) override;
   
  private:
   /// @brief 渲染器实例

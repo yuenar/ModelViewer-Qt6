@@ -51,55 +51,65 @@ qt_add_executable(ModelViewer
     ${MATH_SOURCES}
 )
 
-# 编译 QSB 着色器 - 编译所有已修复的着色器
-qt_add_shaders(ModelViewer "shaders"
-        # Qt6 着色器编译配置
-        set(SHADER_COMPILE_OPTIONS
-            PRECOMPILE
-            OPTIMIZE
-            GLSL "100 es,120,150"
-            HLSL 50
-            MSL 12
-        )
+# ── 几何着色器：仅编译 GLSL（OpenGL 独有，无 HLSL/MSL 等价物）──────────────
 
-        message(STATUS "Using Qt6 standard shader compilation")
-
+qt_add_shaders(ModelViewer "shaders_geom"
+    GLSL "150"
+    NOHLSL          # ← 这两行是关键，缺一不可
+    NOMSL
     FILES
-        shaders/phong.vert
-        shaders/phong.frag
-        shaders/wireframe.vert
-        shaders/wireframe.frag
-        shaders/normals.vert
-        shaders/normals.frag
-        shaders/background.vert
-        shaders/background.frag
-        shaders/face_normal.vert
-        shaders/face_normal.frag
-        shaders/vertex_normal.vert
-        shaders/vertex_normal.frag
-        shaders/axis.vert
-        shaders/axis.frag
-        shaders/clipped_mesh.vert
-        shaders/clipped_mesh.frag
-        shaders/clipping_plane.vert
-        shaders/clipping_plane.frag
-        shaders/debug_quad.vert
-        shaders/debug_quad_depth.frag
-        shaders/light_cube.vert
-        shaders/light_cube.frag
-        shaders/irradiance_convolution.frag
-        shaders/selection.vert
-        shaders/selection.frag
-        shaders/shadow_mapping_depth.vert
-        shaders/shadow_mapping_depth.frag
-        shaders/skybox.vert
-        shaders/skybox.frag
-        shaders/splitScreen.vert
-        shaders/splitScreen.frag
-        shaders/text.vert
-        shaders/text.frag
-        shaders/brdf.vert
-        shaders/brdf.frag
+    shaders/normals.geom
+    shaders/face_normal.geom
+    shaders/facenormal.geom
+    shaders/vertex_normal.geom
+    shaders/axis.geom
+    shaders/twoside_per_fragment.geom
+    shaders/subdiv.geom
+)
+
+# ── 普通着色器：多后端（GLSL / HLSL / MSL）────────────────────────────────
+qt_add_shaders(ModelViewer "shaders_main"
+    GLSL "100 es,120,150"
+    HLSL 50
+    MSL 12
+    PRECOMPILE
+    OPTIMIZE
+    FILES
+    shaders/phong.vert
+    shaders/phong.frag
+    shaders/wireframe.vert
+    shaders/wireframe.frag
+    shaders/normals.vert
+    shaders/normals.frag
+    shaders/background.vert
+    shaders/background.frag
+    shaders/face_normal.vert
+    shaders/face_normal.frag
+    shaders/vertex_normal.vert
+    shaders/vertex_normal.frag
+    shaders/axis.vert
+    shaders/axis.frag
+    shaders/clipped_mesh.vert
+    shaders/clipped_mesh.frag
+    shaders/clipping_plane.vert
+    shaders/clipping_plane.frag
+    shaders/debug_quad.vert
+    shaders/debug_quad_depth.frag
+    shaders/light_cube.vert
+    shaders/light_cube.frag
+    shaders/irradiance_convolution.frag
+    shaders/selection.vert
+    shaders/selection.frag
+    shaders/shadow_mapping_depth.vert
+    shaders/shadow_mapping_depth.frag
+    shaders/skybox.vert
+    shaders/skybox.frag
+    shaders/splitScreen.vert
+    shaders/splitScreen.frag
+    shaders/text.vert
+    shaders/text.frag
+    shaders/brdf.vert
+    shaders/brdf.frag
 )
 
 target_link_libraries(ModelViewer PRIVATE

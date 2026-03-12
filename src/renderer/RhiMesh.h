@@ -104,6 +104,11 @@ class RhiMesh {
   /// 
   /// @note 用于绘制调用：glDrawElements(GL_TRIANGLES, count, ...)
   int indexCount() const { return m_indexCount; }
+  
+  /// @brief 获取顶点数量
+  /// 
+  /// @return int 顶点缓冲区中的顶点数量
+  int vertexCount() const { return m_cpuData.vertices.size(); }
 
  private:
   /// @brief RHI 设备指针

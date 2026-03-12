@@ -152,6 +152,32 @@ class Camera {
   /// 
   /// @note 会自动调整摄像机位置、视场角等参数
   void fitToView(const BoundingBox& bbox);
+  
+  /// @brief 设置摄像机位置
+  /// 
+  /// 直接设置摄像机的眼睛位置。
+  /// 
+  /// @param[in] pos 新的摄像机位置
+  void setPosition(const QVector3D& pos);
+  
+  /// @brief 设置摄像机目标点
+  /// 
+  /// 设置摄像机看向的目标点（旋转中心）。
+  /// 
+  /// @param[in] target 新的目标点
+  void setTarget(const QVector3D& target);
+  
+  /// @brief 设置摄像机上向量
+  /// 
+  /// 设置摄像机的上方向向量。
+  /// 
+  /// @param[in] up 新的上向量
+  void setUp(const QVector3D& up);
+  
+  /// @brief 重置摄像机到默认状态
+  /// 
+  /// 将摄像机重置为初始位置和方向。
+  void reset();
 
  private:
   /// @brief 轨迹球控制器，用于处理旋转操作
@@ -162,6 +188,9 @@ class Camera {
   
   /// @brief 摄像机位置（眼睛位置）
   QVector3D m_eye{0, 0, 5};
+  
+  /// @brief 摄像机上向量
+  QVector3D m_up{0, 1, 0};
   
   /// @brief 透视投影的视场角（度）
   float m_fov = 45.0f;

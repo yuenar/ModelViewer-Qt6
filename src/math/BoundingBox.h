@@ -103,6 +103,16 @@ class BoundingBox {
   /// 
   /// @note 空包围盒表示还没有添加任何点
   bool isEmpty() const;
+  
+  /// @brief 获取包围盒的最小角点
+  /// 
+  /// @return QVector3D 包围盒的最小角点坐标
+  QVector3D min() const { return m_min; }
+  
+  /// @brief 获取包围盒的最大角点
+  /// 
+  /// @return QVector3D 包围盒的最大角点坐标
+  QVector3D max() const { return m_max; }
 
  private:
   /// @brief 包围盒的最小角点

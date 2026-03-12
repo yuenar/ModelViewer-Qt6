@@ -1,9 +1,9 @@
-#version 460
+#version 450 core
 
 layout(triangles) in;
 layout(line_strip, max_vertices = 6) out;
 
-layout(std140, binding = 0) uniform FrameUBO {
+layout(std140, set = 0, binding = 0) uniform FrameUBO {
     mat4 model;
     mat4 view;
     mat4 projection;
@@ -13,7 +13,7 @@ layout(std140, binding = 0) uniform FrameUBO {
     vec3 viewPos;    float _p2;
 };
 
-layout(std140, binding = 2) uniform NormalsUBO {
+layout(std140, set = 0, binding = 2) uniform NormalsUBO {
     float normalLength;
 };
 

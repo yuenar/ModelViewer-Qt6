@@ -13,7 +13,7 @@ layout(location = 2) out vec2 g_texCoord2d;
 
 layout(location = 3) out vec3 g_edgeDistance;
 
-layout(std140, binding = 0) uniform AxisGeomUBO {
+layout(std140, set = 0, binding = 0) uniform AxisGeomUBO {
     mat4 viewportMatrix;
 };
 
