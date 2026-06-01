@@ -22,8 +22,7 @@ elseif(APPLE)
 endif()
 
 # 查找 Qt6
-find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Qml Quick QuickControls2 ShaderTools)
-
+find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Qml Quick QuickControls2 ShaderTools GuiPrivate)
 # 查找 OpenMP（可选）
 find_package(OpenMP QUIET)
 
@@ -116,6 +115,7 @@ qt_add_shaders(ModelViewer "shaders_main"
 
 target_link_libraries(ModelViewer PRIVATE
     Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Qml Qt6::Quick Qt6::QuickControls2 Qt6::ShaderTools
+    Qt6::GuiPrivate
     assimp::assimp
 )
 
