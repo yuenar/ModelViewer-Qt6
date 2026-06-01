@@ -115,7 +115,7 @@ qt_add_shaders(ModelViewer "shaders_main"
 )
 
 target_link_libraries(ModelViewer PRIVATE
-    Qt6::Core Qt6::Gui Qt6::Widgets Qt6::GuiPrivate Qt6::Qml Qt6::Quick Qt6::QuickControls2 Qt6::ShaderTools
+    Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Qml Qt6::Quick Qt6::QuickControls2 Qt6::ShaderTools
     assimp::assimp
 )
 
