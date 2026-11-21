@@ -16,8 +16,10 @@
 #define MODELVIEWER_SRC_RENDERER_RHIRENDERER_H_
 
 #include <rhi/qrhi.h>
+#include <QHash>
 #include <QImage>
 #include <QMatrix4x4>
+#include <QMutex>
 #include <QSize>
 #include <QString>
 #include <QVector>
@@ -164,6 +166,14 @@ class RhiRenderer {
 
   void setRenderTarget(QRhiRenderTarget* rt);
   void rebuildPipelines();
+
+  /// @brief 运行时着色器覆盖（资源路径 -> 磁盘 qsb 路径）
+  void setShaderOverride(const QString& resourcePath, const QString& filePath);
+  void clearShaderOverride(const QString& resourcePath);
+  void clearShaderOverrides();
+
+  /// @brief 请求在下一帧重建全部管线（线程安全）
+  void requestPipelineRebuild() { m_pipelineRebuildRequested = true; }
 
   QRhi* rhi() const { return m_rhi; }
   bool isInitialized() const { return m_initialized; }
@@ -318,6 +328,9 @@ class RhiRenderer {
   QRhi* m_rhi = nullptr;
   QRhiRenderTarget* m_rt = nullptr;
   bool m_initialized = false;
+  QHash<QString, QString> m_shaderOverrides;
+  QMutex m_shaderMutex;
+  bool m_pipelineRebuildRequested = false;
 
   // ── 公共 UBO ──────────────────────────────────────────────
   QRhiBuffer* m_frameUBO = nullptr;      ///< 动态偏移，多槽位

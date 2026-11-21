@@ -68,9 +68,11 @@ Additional implemented features:
 - LAN real-time collaboration over TCP with optional session token and
   per-object last-writer-wins merge (`--collab-host`, `--collab-join`,
   `--collab-token`)
+- Runtime shader editor (edit `shaders/*.vert|frag`, compile with Qt `qsb`,
+  hot-rebuild pipelines) and custom script tool editor
 - Command-line automation flags (`--help`)
 
-Long-term items not implemented: shader/tool editors.
+All planned feature groups are implemented.
 
 ### Rendering Effects Gallery
 
@@ -248,6 +250,10 @@ cmake --build . --config Release
   Rename `F2`, Delete `Del`)
 - **Script Console**: Tools → Script Console; `viewer.*` API and `console.log()`.
   JavaScript files in `plugins/` next to the executable auto-load.
+- **Shader Editor**: Tools → Shader Editor; edit GLSL sources, compile with
+  `qsb`, hot-reload pipelines, restore built-ins. CLI: `--shader <file>`.
+- **Tool Editor**: Tools → Custom Tool Editor; create/edit/run `plugins/*.js`
+  script tools.
 - **C++ Plugins**: drop plugin DLLs into `plugins/`; a demo plugin is built
   from `plugins_src/DemoPlugin`.
 - **Collaboration**: Tools → Collaboration (export/import scene JSON,
@@ -423,9 +429,11 @@ PBR（Cook-Torrance + metallic/roughness）、阴影映射（比较采样器 + 3
 - C++ ABI 插件（`ModelViewerPlugin` 接口 + `plugins_src/` 示例插件）
 - 场景状态 JSON 导入/导出与共享文件本地协作同步
 - 基于 TCP 的局域网实时协作（可选会话令牌 + 逐对象时间戳合并；`--collab-token`）
+- 运行时着色器编辑器（编辑 `shaders/*.vert|frag`，用 Qt `qsb` 编译并热重建管线）
+  与自定义脚本工具编辑器
 - 命令行自动化参数（`--help`）
 
-长期项中仍未实现：着色器/工具编辑器。
+计划内的功能组已全部实现。
 
 ### 渲染效果展示
 
@@ -584,13 +592,16 @@ make -j$(nproc)
 - **模型编辑**：编辑菜单或对象面板（复制 `Ctrl+D`、重命名 `F2`、删除 `Del`）
 - **脚本控制台**：工具 → Script Console，使用 `viewer.*` API 与
   `console.log()`；可执行文件旁 `plugins/` 内的 `.js` 会自动加载
+- **着色器编辑器**：工具 → Shader Editor，编辑 GLSL 源码，用 `qsb` 编译并热重建
+  管线，可恢复内置版本；命令行 `--shader <file>`
+- **工具编辑器**：工具 → Custom Tool Editor，新建/编辑/运行 `plugins/*.js` 脚本工具
 - **C++ 插件**：将插件 DLL 放入 `plugins/`；`plugins_src/DemoPlugin` 提供示例插件
 - **协作**：工具 → Collaboration（场景 JSON 导入/导出、共享文件本地同步、
   TCP 主机/加入会话）
 - **视图历史**：视图 → View History（Back / Forward，Alt+← / Alt+→）
 - **自动化参数**：`--msaa`、`--fxaa`、`--ao`、`--animate`、`--anim-time`、
-  `--script`、`--scene-export`、`--scene-import`、`--collab-host`、
-  `--collab-join`、`--stats`
+  `--script`、`--shader`、`--scene-export`、`--scene-import`、`--collab-host`、
+  `--collab-join`、`--collab-token`、`--stats`
 
 ### 快捷键
 - `Space`：重置视图，`F`：适配视图

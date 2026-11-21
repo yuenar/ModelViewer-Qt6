@@ -74,6 +74,14 @@ target_link_libraries(ModelViewer PRIVATE
     assimp::assimp
 )
 
+# ── 运行时着色器编辑器：把 GLSL 源码复制到可执行文件旁 ─────────────
+add_custom_command(TARGET ModelViewer POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+        "${CMAKE_CURRENT_SOURCE_DIR}/shaders"
+        "$<TARGET_FILE_DIR:ModelViewer>/shaders"
+    COMMENT "Copy shader sources for runtime editing"
+)
+
 # ── 光标资源（旋转/平移/缩放）──────────────────────────────────────
 qt_add_resources(ModelViewer "cursors"
     PREFIX "/res"

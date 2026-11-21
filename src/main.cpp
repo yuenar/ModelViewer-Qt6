@@ -82,6 +82,8 @@ int main(int argc, char* argv[]) {
                                       "Join a collaboration session (host:port).", "address");
   QCommandLineOption collabTokenOption("collab-token",
                                        "Collaboration session token.", "token");
+  QCommandLineOption shaderOption("shader",
+                                  "Compile and apply a shader source override.", "file");
 
   parser.addOption(modelOption);
   parser.addOption(surfaceOption);
@@ -110,6 +112,7 @@ int main(int argc, char* argv[]) {
   parser.addOption(collabHostOption);
   parser.addOption(collabJoinOption);
   parser.addOption(collabTokenOption);
+  parser.addOption(shaderOption);
   parser.process(app);
 
   MainWindow window;
@@ -182,7 +185,8 @@ int main(int argc, char* argv[]) {
   auto applySceneOptions = [&window, &parser, &viewOption, &selectOption,
                             &transformOption, &colorOption, &animateOption,
                             &animTimeOption, &scriptOption,
-                            &sceneExportOption, &sceneImportOption]() {
+                            &sceneExportOption, &sceneImportOption,
+                            &shaderOption]() {
     if (parser.isSet(viewOption)) {
       bool ok = false;
       const int preset = parser.value(viewOption).toInt(&ok);
@@ -233,6 +237,15 @@ int main(int argc, char* argv[]) {
     }
     if (parser.isSet(scriptOption)) {
       window.runScriptFile(parser.value(scriptOption));
+    }
+    if (parser.isSet(shaderOption)) {
+      QString error;
+      if (window.applyShaderFile(parser.value(shaderOption), &error)) {
+        std::printf("SHADER_OK\n");
+      } else {
+        std::printf("SHADER_ERROR: %s\n", error.toUtf8().constData());
+      }
+      std::fflush(stdout);
     }
     if (parser.isSet(sceneExportOption)) {
       window.exportSceneState(parser.value(sceneExportOption));

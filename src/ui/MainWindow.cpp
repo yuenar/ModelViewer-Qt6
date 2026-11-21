@@ -3,6 +3,8 @@
 #include "MaterialDialog.h"
 #include "LightDialog.h"
 #include "ScriptConsole.h"
+#include "ShaderEditor.h"
+#include "ToolEditor.h"
 #include "../net/CollabSession.h"
 #include "../plugin/PluginManager.h"
 #include "../renderer/RhiRenderer.h"
@@ -742,6 +744,22 @@ void MainWindow::setupMenus() {
     QAction* scriptConsoleAction = toolsMenu->addAction("&Script Console...");
     connect(scriptConsoleAction, &QAction::triggered, this,
             &MainWindow::onScriptConsole);
+    QAction* shaderEditorAction = toolsMenu->addAction("Shader &Editor...");
+    connect(shaderEditorAction, &QAction::triggered, this, [this]() {
+        auto* dialog = new ShaderEditor(m_rhiWidget, this);
+        dialog->setAttribute(Qt::WA_DeleteOnClose);
+        dialog->show();
+    });
+    QAction* toolEditorAction = toolsMenu->addAction("Custom &Tool Editor...");
+    connect(toolEditorAction, &QAction::triggered, this, [this]() {
+        const QString directory =
+            QCoreApplication::applicationDirPath() + "/plugins";
+        auto* dialog = new ToolEditor(
+            directory,
+            [this](const QString& path) { return runScriptFile(path); }, this);
+        dialog->setAttribute(Qt::WA_DeleteOnClose);
+        dialog->show();
+    });
     QAction* reloadPluginsAction = toolsMenu->addAction("Reload Script &Plugins");
     connect(reloadPluginsAction, &QAction::triggered, this, [this]() {
         loadPlugins();
@@ -1861,6 +1879,10 @@ ScriptConsole* MainWindow::ensureScriptConsole() {
 
 bool MainWindow::runScriptFile(const QString& path) {
     return ensureScriptConsole()->runFile(path);
+}
+
+bool MainWindow::applyShaderFile(const QString& path, QString* error) {
+    return ShaderEditor::compileAndApply(m_rhiWidget, path, error);
 }
 
 void MainWindow::loadNativePlugins() {

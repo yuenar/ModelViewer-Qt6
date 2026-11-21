@@ -41,16 +41,41 @@ RhiRenderer::~RhiRenderer() {
 }
 
 QShader RhiRenderer::loadShader(const QString& qsbPath) {
-    QFile file(qsbPath);
+    QString filePath = qsbPath;
+    {
+        QMutexLocker locker(&m_shaderMutex);
+        auto it = m_shaderOverrides.constFind(qsbPath);
+        if (it != m_shaderOverrides.constEnd()) {
+            filePath = it.value();
+        }
+    }
+
+    QFile file(filePath);
     if (!file.open(QIODevice::ReadOnly)) {
-        qWarning() << "Cannot open shader:" << qsbPath;
+        qWarning() << "Cannot open shader:" << filePath;
         return QShader();
     }
     const QShader shader = QShader::fromSerialized(file.readAll());
     if (!shader.isValid()) {
-        qWarning() << "Invalid shader:" << qsbPath;
+        qWarning() << "Invalid shader:" << filePath;
     }
     return shader;
+}
+
+void RhiRenderer::setShaderOverride(const QString& resourcePath,
+                                    const QString& filePath) {
+    QMutexLocker locker(&m_shaderMutex);
+    m_shaderOverrides.insert(resourcePath, filePath);
+}
+
+void RhiRenderer::clearShaderOverride(const QString& resourcePath) {
+    QMutexLocker locker(&m_shaderMutex);
+    m_shaderOverrides.remove(resourcePath);
+}
+
+void RhiRenderer::clearShaderOverrides() {
+    QMutexLocker locker(&m_shaderMutex);
+    m_shaderOverrides.clear();
 }
 
 void RhiRenderer::initialize(QRhiCommandBuffer* cb) {
@@ -1589,6 +1614,12 @@ void RhiRenderer::render(QRhiCommandBuffer* cb,
                          const Material& mat) {
     if (!m_initialized || !m_rt) {
         return;
+    }
+
+    if (m_pipelineRebuildRequested) {
+        destroyPipelines();
+        buildAllPipelines();
+        m_pipelineRebuildRequested = false;
     }
 
     uploadMeshes(cb, meshes);

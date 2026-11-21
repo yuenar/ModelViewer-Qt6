@@ -101,6 +101,9 @@ class MainWindow : public QMainWindow {
   void loadPlugins();
   void loadNativePlugins();
 
+  /// @brief 运行时编译并应用着色器覆盖（供命令行/编辑器使用）
+  bool applyShaderFile(const QString& path, QString* error);
+
   /// @brief 网络实时协作
   bool hostCollabSession(quint16 port, const QString& token = QString());
   bool joinCollabSession(const QString& host, quint16 port,

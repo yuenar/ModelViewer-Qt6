@@ -17,6 +17,7 @@
 
 #include <QRhiWidget>
 #include <QElapsedTimer>
+#include <QHash>
 #include <QMatrix4x4>
 #include <QPoint>
 #include <QTimer>
@@ -155,7 +156,7 @@ class RhiWidget : public QRhiWidget {
   Camera& getCamera() { return m_camera; }
   const Camera& getCamera() const { return m_camera; }
 
-  // ── 视图历史 / 过渡动画 ──────────────────────────────────
+  /// @brief 视图历史 / 过渡动画
   struct ViewState {
     QVector3D eye;
     QVector3D target;
@@ -170,6 +171,11 @@ class RhiWidget : public QRhiWidget {
   void goBack();
   void goForward();
   int viewHistorySize() const { return m_viewHistory.size(); }
+
+  // ── 运行时着色器覆盖 ─────────────────────────────────────
+  void applyShaderOverride(const QString& resourcePath, const QString& filePath);
+  void clearShaderOverride(const QString& resourcePath);
+  void reloadShaders();
 
  signals:
   void projectionChanged(bool orthographic);
@@ -227,6 +233,7 @@ class RhiWidget : public QRhiWidget {
   QVector3D m_bgTopColor{0.2f, 0.2f, 0.3f};
   QVector3D m_bgBotColor{0.1f, 0.1f, 0.15f};
   QImage m_pendingDiffuseTexture;
+  QHash<QString, QString> m_shaderOverrides;
 
   QWidget* m_hud = nullptr;
   QElapsedTimer m_fpsTimer;

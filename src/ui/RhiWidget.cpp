@@ -160,6 +160,10 @@ void RhiWidget::initialize(QRhiCommandBuffer* cb) {
         m_renderer = new RhiRenderer(rhi(), renderTarget());
         m_renderer->setDiffuseTexture(m_pendingDiffuseTexture);
         m_renderer->setPostProcessing(m_fxaaEnabled, m_aoEnabled);
+        for (auto it = m_shaderOverrides.constBegin();
+             it != m_shaderOverrides.constEnd(); ++it) {
+            m_renderer->setShaderOverride(it.key(), it.value());
+        }
         m_renderer->initialize(cb);
         m_renderer->setBackgroundColors(m_bgTopColor, m_bgBotColor);
         m_renderer->setNormalLength(qMax(m_sceneBbox.radius() * 0.15f, 0.05f));
@@ -908,6 +912,32 @@ void RhiWidget::resetAnimationDeltas() {
     }
     if (changed && m_renderer) {
         m_renderer->resetMeshUploadFlag();
+    }
+    update();
+}
+
+void RhiWidget::reloadShaders() {
+    if (m_renderer) {
+        m_renderer->requestPipelineRebuild();
+    }
+    update();
+}
+
+void RhiWidget::applyShaderOverride(const QString& resourcePath,
+                                    const QString& filePath) {
+    m_shaderOverrides.insert(resourcePath, filePath);
+    if (m_renderer) {
+        m_renderer->setShaderOverride(resourcePath, filePath);
+        m_renderer->requestPipelineRebuild();
+    }
+    update();
+}
+
+void RhiWidget::clearShaderOverride(const QString& resourcePath) {
+    m_shaderOverrides.remove(resourcePath);
+    if (m_renderer) {
+        m_renderer->clearShaderOverride(resourcePath);
+        m_renderer->requestPipelineRebuild();
     }
     update();
 }
