@@ -36,9 +36,13 @@ class CollabSession : public QObject {
   explicit CollabSession(QObject* parent = nullptr);
   ~CollabSession() override;
 
-  bool host(quint16 port);
-  bool join(const QString& hostName, quint16 port);
+  bool host(quint16 port, const QString& token = QString());
+  bool join(const QString& hostName, quint16 port,
+            const QString& token = QString());
   void disconnectSession();
+
+  void setToken(const QString& token) { m_token = token; }
+  QString token() const { return m_token; }
 
   bool isActive() const;
   bool isHosting() const { return m_hosting; }
@@ -68,6 +72,7 @@ class CollabSession : public QObject {
   QHash<QTcpSocket*, QByteArray> m_buffers;
   bool m_hosting = false;
   bool m_shuttingDown = false;
+  QString m_token;
   QString m_status;
 };
 

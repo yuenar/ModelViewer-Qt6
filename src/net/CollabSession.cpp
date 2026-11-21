@@ -28,9 +28,10 @@ CollabSession::~CollabSession() {
     }
 }
 
-bool CollabSession::host(quint16 port) {
+bool CollabSession::host(quint16 port, const QString& token) {
     disconnectSession();
 
+    m_token = token;
     m_hosting = true;
     m_server = new QTcpServer(this);
     connect(m_server, &QTcpServer::newConnection, this,
@@ -48,9 +49,11 @@ bool CollabSession::host(quint16 port) {
     return true;
 }
 
-bool CollabSession::join(const QString& hostName, quint16 port) {
+bool CollabSession::join(const QString& hostName, quint16 port,
+                         const QString& token) {
     disconnectSession();
 
+    m_token = token;
     m_hosting = false;
     m_client = new QTcpSocket(this);
     connect(m_client, &QTcpSocket::readyRead, this,
@@ -107,6 +110,7 @@ void CollabSession::sendState(const QJsonObject& state) {
 
     QJsonObject message;
     message.insert("type", QString("state"));
+    message.insert("token", m_token);
     message.insert("state", state);
 
     QByteArray payload =
@@ -173,6 +177,18 @@ void CollabSession::processSocket(QTcpSocket* socket) {
             if (document.isObject()) {
                 const QJsonObject message = document.object();
                 if (message.value("type").toString() == "state") {
+                    // 会话令牌校验（空令牌表示不启用鉴权）
+                    const QString token = message.value("token").toString();
+                    if (!m_token.isEmpty() && token != m_token) {
+                        setStatus("Collaboration: authentication failed");
+                        if (m_hosting) {
+                            socket->disconnectFromHost();
+                        } else if (m_client) {
+                            m_client->disconnectFromHost();
+                        }
+                        return;
+                    }
+
                     const QJsonObject state = message.value("state").toObject();
                     if (!state.isEmpty()) {
                         // 主机转发给其他成员，避免环形广播

@@ -60,16 +60,17 @@ Additional implemented features:
 - Frustum culling, distance LOD (vertex clustering), GPU buffer pool,
   shared-material batching, render statistics in the HUD
 - Node keyframe animation and skeletal skinning (GPU skinning via dynamic
-  bone UBO, CPU fallback for more than 64 bones)
+  bone UBO, up to 128 bones, CPU fallback beyond that)
 - View history with smooth camera transitions (Alt+Left / Alt+Right)
 - QJSEngine script console and `plugins/*.js` auto-loading
 - C++ ABI plugins (`ModelViewerPlugin` + demo plugin in `plugins_src/`)
 - Scene state JSON export/import and shared-file local collaboration sync
-- LAN real-time collaboration over TCP (`--collab-host`, `--collab-join`)
+- LAN real-time collaboration over TCP with optional session token and
+  per-object last-writer-wins merge (`--collab-host`, `--collab-join`,
+  `--collab-token`)
 - Command-line automation flags (`--help`)
 
-Long-term items not implemented: authenticated/conflict-merged network
-collaboration, shader/tool editors.
+Long-term items not implemented: shader/tool editors.
 
 ### Rendering Effects Gallery
 
@@ -416,15 +417,15 @@ PBR（Cook-Torrance + metallic/roughness）、阴影映射（比较采样器 + 3
 - 裁剪平面剖面的封盖几何
 - MSAA（2x/4x/8x）、FXAA、基于深度的 AO 后处理
 - 视锥剔除、距离 LOD（顶点聚类）、GPU 缓冲池、同材质批处理、HUD 渲染统计
-- 节点关键帧动画与骨骼蒙皮（GPU 蒙皮：动态骨骼 UBO；超过 64 骨骼回退 CPU）
+- 节点关键帧动画与骨骼蒙皮（GPU 蒙皮：动态骨骼 UBO，最多 128 骨骼，超出回退 CPU）
 - 视图历史与平滑相机过渡（Alt+← / Alt+→）
 - QJSEngine 脚本控制台与 `plugins/*.js` 自动加载
 - C++ ABI 插件（`ModelViewerPlugin` 接口 + `plugins_src/` 示例插件）
 - 场景状态 JSON 导入/导出与共享文件本地协作同步
-- 基于 TCP 的局域网实时协作（`--collab-host`、`--collab-join`）
+- 基于 TCP 的局域网实时协作（可选会话令牌 + 逐对象时间戳合并；`--collab-token`）
 - 命令行自动化参数（`--help`）
 
-长期项中仍未实现：带鉴权/冲突合并的网络协作、着色器/工具编辑器。
+长期项中仍未实现：着色器/工具编辑器。
 
 ### 渲染效果展示
 

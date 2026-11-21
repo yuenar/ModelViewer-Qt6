@@ -16,7 +16,9 @@
 #define MODELVIEWER_SRC_UI_MAINWINDOW_H_
 
 #include <QMainWindow>
+#include <QByteArray>
 #include <QFutureWatcher>
+#include <QHash>
 #include <QStringList>
 #include <QVector>
 #include <QVector3D>
@@ -100,8 +102,9 @@ class MainWindow : public QMainWindow {
   void loadNativePlugins();
 
   /// @brief 网络实时协作
-  bool hostCollabSession(quint16 port);
-  bool joinCollabSession(const QString& host, quint16 port);
+  bool hostCollabSession(quint16 port, const QString& token = QString());
+  bool joinCollabSession(const QString& host, quint16 port,
+                         const QString& token = QString());
   void disconnectCollabSession();
 
   /// @brief 应用对象变换参数（供撤销/重做命令调用）
@@ -184,6 +187,8 @@ class MainWindow : public QMainWindow {
   void onNetTick();
   void ensureCollabSession();
   void handleRemoteSceneState(const QJsonObject& state);
+  void updateObjectStamps();
+  QByteArray meshSnapshot(int index) const;
 
   RhiWidget* m_rhiWidget = nullptr;
   QTabWidget* m_tabs = nullptr;
@@ -229,6 +234,9 @@ class MainWindow : public QMainWindow {
   CollabSession* m_collab = nullptr;
   QTimer* m_netTimer = nullptr;
   QByteArray m_lastNetHash;
+  QHash<QString, qint64> m_objectStamps;         ///< 逐对象最后修改时间
+  QHash<QString, QByteArray> m_lastObjectSnapshots;
+  bool m_remoteApplying = false;
 
   PluginManager* m_nativePlugins = nullptr;
 };

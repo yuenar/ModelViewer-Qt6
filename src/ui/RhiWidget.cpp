@@ -1016,9 +1016,13 @@ int RhiWidget::pickMesh(const QPoint& pos) const {
     float bestT = std::numeric_limits<float>::max();
 
     for (int meshIndex = 0; meshIndex < m_meshes.size(); ++meshIndex) {
-        const RhiMesh* mesh = m_meshes[meshIndex];
+        RhiMesh* mesh = m_meshes[meshIndex];
         if (!mesh || !mesh->isVisible()) {
             continue;
+        }
+        // GPU 蒙皮：拾取前按需回算一次 CPU 顶点
+        if (mesh->isSkinned()) {
+            mesh->syncCpuSkinFromBones();
         }
         const CpuMesh& cpu = mesh->cpuMesh();
         if (cpu.bbox.isEmpty()) {

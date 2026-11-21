@@ -16,6 +16,7 @@
 #include <QColorDialog>
 #include <QCoreApplication>
 #include <QCryptographicHash>
+#include <QDateTime>
 #include <QDialog>
 #include <QDir>
 #include <QDockWidget>
@@ -887,6 +888,8 @@ void MainWindow::refreshObjectList() {
         }
         m_committedParams = m_meshParams;
         m_undoStack->clear();
+        m_objectStamps.clear();
+        m_lastObjectSnapshots.clear();
     } else if (m_meshParams.size() != meshCount) {
         // 编辑操作（删除/复制）后按当前对象变换重建参数，避免丢失已有变换
         m_meshParams.resize(meshCount);
@@ -1366,6 +1369,9 @@ QJsonObject MainWindow::captureSceneState() const {
         color.append(material.diffuse.y());
         color.append(material.diffuse.z());
         object.insert("color", color);
+        object.insert("stamp",
+                      double(m_objectStamps.value(object.value("name").toString(),
+                                                 0)));
 
         objects.append(object);
     }
@@ -1470,6 +1476,15 @@ bool MainWindow::applySceneState(const QJsonObject& root, QString* errorMessage)
             continue;
         }
 
+        // 按对象时间戳做后写者优先的冲突合并
+        const qint64 remoteStamp =
+            qint64(object.value("stamp").toDouble());
+        const qint64 localStamp =
+            objectName.isEmpty() ? 0 : m_objectStamps.value(objectName, 0);
+        if (remoteStamp > 0 && localStamp > remoteStamp) {
+            continue;
+        }
+
         if (object.contains("visible")) {
             m_rhiWidget->setMeshVisible(target,
                                         object.value("visible").toBool());
@@ -1495,6 +1510,10 @@ bool MainWindow::applySceneState(const QJsonObject& root, QString* errorMessage)
                                          float(color[2].toDouble()));
             m_rhiWidget->setMeshMaterial(target, material);
         }
+
+        if (!objectName.isEmpty() && remoteStamp > 0) {
+            m_objectStamps[objectName] = remoteStamp;
+        }
     }
 
     const QJsonObject animation = root.value("animation").toObject();
@@ -1516,6 +1535,14 @@ bool MainWindow::applySceneState(const QJsonObject& root, QString* errorMessage)
     m_committedParams = m_meshParams;
     m_undoStack->clear();
     m_rhiWidget->recordViewState();
+
+    // 以应用后的实际状态重建快照，避免产生“本地新改动”时间戳
+    m_lastObjectSnapshots.clear();
+    for (int i = 0; i < m_rhiWidget->meshCount(); ++i) {
+        m_lastObjectSnapshots.insert(m_rhiWidget->meshName(i),
+                                     meshSnapshot(i));
+    }
+
     refreshObjectList();
     return true;
 }
@@ -1634,20 +1661,25 @@ void MainWindow::ensureCollabSession() {
     connect(m_netTimer, &QTimer::timeout, this, &MainWindow::onNetTick);
 }
 
-bool MainWindow::hostCollabSession(quint16 port) {
+bool MainWindow::hostCollabSession(quint16 port, const QString& token) {
     ensureCollabSession();
     m_lastNetHash.clear();
-    const bool ok = m_collab->host(port);
+    m_objectStamps.clear();
+    m_lastObjectSnapshots.clear();
+    const bool ok = m_collab->host(port, token);
     if (ok) {
         m_netTimer->start();
     }
     return ok;
 }
 
-bool MainWindow::joinCollabSession(const QString& host, quint16 port) {
+bool MainWindow::joinCollabSession(const QString& host, quint16 port,
+                                   const QString& token) {
     ensureCollabSession();
     m_lastNetHash.clear();
-    const bool ok = m_collab->join(host, port);
+    m_objectStamps.clear();
+    m_lastObjectSnapshots.clear();
+    const bool ok = m_collab->join(host, port, token);
     if (ok) {
         m_netTimer->start();
     }
@@ -1673,7 +1705,14 @@ void MainWindow::onHostSession() {
     if (!ok) {
         return;
     }
-    if (hostCollabSession(quint16(port))) {
+    bool tokenOk = false;
+    const QString token = QInputDialog::getText(
+        this, "Host Collaboration", "Session token (optional):",
+        QLineEdit::Password, QString(), &tokenOk);
+    if (!tokenOk) {
+        return;
+    }
+    if (hostCollabSession(quint16(port), token)) {
         statusBar()->showMessage(
             QString("Hosting collaboration on port %1").arg(port), 5000);
     } else {
@@ -1705,17 +1744,63 @@ void MainWindow::onJoinSession() {
         return;
     }
 
-    if (joinCollabSession(host, port)) {
+    bool tokenOk = false;
+    const QString token = QInputDialog::getText(
+        this, "Join Collaboration", "Session token (optional):",
+        QLineEdit::Password, QString(), &tokenOk);
+    if (!tokenOk) {
+        return;
+    }
+
+    if (joinCollabSession(host, port, token)) {
         statusBar()->showMessage(
             QString("Joining collaboration at %1:%2").arg(host).arg(port),
             5000);
     }
 }
 
+QByteArray MainWindow::meshSnapshot(int index) const {
+    QByteArray snapshot;
+    if (!m_rhiWidget || index < 0 || index >= m_rhiWidget->meshCount()) {
+        return snapshot;
+    }
+
+    snapshot.append(char(m_rhiWidget->isMeshVisible(index) ? 1 : 0));
+    const QMatrix4x4 transform = m_rhiWidget->meshTransform(index);
+    snapshot.append(reinterpret_cast<const char*>(transform.constData()),
+                    sizeof(float) * 16);
+    const Material material = m_rhiWidget->meshMaterial(index);
+    const float color[3] = {material.diffuse.x(), material.diffuse.y(),
+                            material.diffuse.z()};
+    snapshot.append(reinterpret_cast<const char*>(color), sizeof(color));
+    return snapshot;
+}
+
+void MainWindow::updateObjectStamps() {
+    if (!m_rhiWidget || m_remoteApplying) {
+        return;
+    }
+
+    const qint64 now = QDateTime::currentMSecsSinceEpoch();
+    QHash<QString, QByteArray> current;
+    for (int i = 0; i < m_rhiWidget->meshCount(); ++i) {
+        const QString name = m_rhiWidget->meshName(i);
+        const QByteArray snapshot = meshSnapshot(i);
+        current.insert(name, snapshot);
+        if (!m_lastObjectSnapshots.contains(name) ||
+            m_lastObjectSnapshots.value(name) != snapshot) {
+            m_objectStamps[name] = now;
+        }
+    }
+    m_lastObjectSnapshots = current;
+}
+
 void MainWindow::onNetTick() {
     if (!m_collab || !m_collab->isActive() || !m_rhiWidget) {
         return;
     }
+
+    updateObjectStamps();
 
     const QJsonObject state = captureSceneState();
     const QByteArray data =
@@ -1744,7 +1829,10 @@ void MainWindow::handleRemoteSceneState(const QJsonObject& state) {
     }
 
     QString error;
-    if (!applySceneState(state, &error)) {
+    m_remoteApplying = true;
+    const bool applied = applySceneState(state, &error);
+    m_remoteApplying = false;
+    if (!applied) {
         statusBar()->showMessage(
             error.isEmpty() ? "Invalid remote scene state" : error, 4000);
         return;

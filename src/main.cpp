@@ -80,6 +80,8 @@ int main(int argc, char* argv[]) {
                                       "Host a collaboration session on a port.", "port");
   QCommandLineOption collabJoinOption("collab-join",
                                       "Join a collaboration session (host:port).", "address");
+  QCommandLineOption collabTokenOption("collab-token",
+                                       "Collaboration session token.", "token");
 
   parser.addOption(modelOption);
   parser.addOption(surfaceOption);
@@ -107,6 +109,7 @@ int main(int argc, char* argv[]) {
   parser.addOption(sceneImportOption);
   parser.addOption(collabHostOption);
   parser.addOption(collabJoinOption);
+  parser.addOption(collabTokenOption);
   parser.process(app);
 
   MainWindow window;
@@ -158,7 +161,8 @@ int main(int argc, char* argv[]) {
     bool ok = false;
     const int port = parser.value(collabHostOption).toInt(&ok);
     if (ok && port > 0 && port <= 65535) {
-      window.hostCollabSession(quint16(port));
+      window.hostCollabSession(quint16(port),
+                               parser.value(collabTokenOption));
     }
   }
   if (parser.isSet(collabJoinOption)) {
@@ -168,7 +172,8 @@ int main(int argc, char* argv[]) {
       const QString host = address.left(separator);
       const quint16 port = quint16(address.mid(separator + 1).toUInt());
       if (port != 0) {
-        window.joinCollabSession(host, port);
+        window.joinCollabSession(host, port,
+                                 parser.value(collabTokenOption));
       }
     }
   }

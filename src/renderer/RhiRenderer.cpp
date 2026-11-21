@@ -1156,9 +1156,13 @@ void RhiRenderer::rebuildCapGeometry(const QVector<RhiMesh*>& meshes) {
     u.normalize();
     const QVector3D v = QVector3D::crossProduct(normal, u).normalized();
 
-    for (const RhiMesh* mesh : meshes) {
+    for (RhiMesh* mesh : meshes) {
         if (!mesh || !mesh->isVisible()) {
             continue;
+        }
+        // GPU 蒙皮：封盖几何需要当前姿态的 CPU 顶点
+        if (mesh->isSkinned()) {
+            mesh->syncCpuSkinFromBones();
         }
         const CpuMesh& cpu = mesh->cpuMesh();
         QVector<QVector3D> points;
@@ -1679,7 +1683,7 @@ void RhiRenderer::render(QRhiCommandBuffer* cb,
 
             SkinUBOData data{};
             const QVector<QMatrix4x4>& bones = mesh->boneMatrices();
-            const int boneCount = qMin(bones.size(), 64);
+            const int boneCount = qMin(bones.size(), 128);
             for (int b = 0; b < boneCount; ++b) {
                 std::memcpy(data.bones[b], bones[b].constData(),
                             sizeof(float) * 16);

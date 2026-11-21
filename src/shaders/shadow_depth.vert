@@ -10,7 +10,7 @@ layout(std140, binding = 0) uniform ShadowUBO {
 };
 
 layout(std140, binding = 4) uniform SkinUBO {
-    mat4 bones[64];
+    mat4 bones[128];
     mat4 objectMatrix;
     mat4 objectNormalMatrix;
     int boneCount;

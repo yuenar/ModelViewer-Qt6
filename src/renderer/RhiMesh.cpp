@@ -191,6 +191,14 @@ void RhiMesh::resetSkinPose() {
     }
 }
 
+void RhiMesh::syncCpuSkinFromBones() {
+    if (!m_skinned) {
+        return;
+    }
+    // 只更新 CPU 侧数据，不触碰 GPU 缓冲
+    rebuildCpuData(false);
+}
+
 void RhiMesh::rebuildCpuData(bool updateDerived) {
     m_cpuData.vertices = m_baseData.vertices;
 

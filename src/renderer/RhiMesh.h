@@ -51,7 +51,7 @@ class RhiMesh {
   };
 
   /// @brief GPU 蒙皮支持的最大骨骼数（与着色器 SkinUBO 保持一致）
-  static constexpr int kMaxGpuBones = 64;
+  static constexpr int kMaxGpuBones = 128;
 
   /// @brief 构造函数，从 CPU 网格数据创建 GPU 网格
   ///
@@ -158,6 +158,12 @@ class RhiMesh {
 
   /// @brief 恢复绑定姿态
   void resetSkinPose();
+
+  /// @brief 按需用当前骨骼矩阵回算 CPU 顶点
+  ///
+  /// GPU 蒙皮时顶点缓冲保持局部坐标；拾取、剖面封盖等 CPU 侧逻辑
+  /// 在需要时调用该方法做一次等价“回读”，不影响 GPU 数据。
+  void syncCpuSkinFromBones();
 
   /// @brief 复制该对象（共享原始几何，独立的 GPU 资源与变换）
   RhiMesh* clone() const;

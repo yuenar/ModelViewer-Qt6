@@ -96,7 +96,7 @@ struct alignas(16) PostUBOData {
 /// bones 为骨骼蒙皮矩阵（含逆绑定矩阵）；objectMatrix 在蒙皮后应用，
 /// 用于保留逐对象的用户变换。骨骼数超过上限的对象回退到 CPU 蒙皮。
 struct alignas(16) SkinUBOData {
-  float bones[64][16];
+  float bones[128][16];
   float objectMatrix[16];
   float objectNormalMatrix[16];
   int boneCount = 0;
