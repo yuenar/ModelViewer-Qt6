@@ -44,6 +44,15 @@ class RhiMesh {
     QVector3D direction;
   };
 
+  /// @brief GPU 蒙皮顶点属性（骨骼索引 + 权重）
+  struct SkinGpuVertex {
+    quint32 boneIndex[4] = {0, 0, 0, 0};
+    float weight[4] = {0.0f, 0.0f, 0.0f, 0.0f};
+  };
+
+  /// @brief GPU 蒙皮支持的最大骨骼数（与着色器 SkinUBO 保持一致）
+  static constexpr int kMaxGpuBones = 64;
+
   /// @brief 构造函数，从 CPU 网格数据创建 GPU 网格
   ///
   /// @param[in] rhi RHI 设备指针，用于创建 GPU 资源
@@ -130,6 +139,20 @@ class RhiMesh {
   /// @brief 是否为骨骼蒙皮网格
   bool isSkinned() const { return m_skinned; }
 
+  /// @brief 是否使用 GPU 蒙皮（骨骼数在限制内）
+  bool gpuSkinEnabled() const { return m_gpuSkin; }
+
+  /// @brief GPU 蒙皮的骨骼矩阵（骨骼空间 -> 模型空间）
+  const QVector<QMatrix4x4>& boneMatrices() const { return m_boneMatrices; }
+
+  /// @brief 作用于蒙皮结果的用户对象变换
+  QMatrix4x4 objectMatrix() const { return m_transform; }
+
+  /// @brief 蒙皮顶点属性缓冲；非蒙皮网格返回普通顶点缓冲（着色器不会读取）
+  QRhiBuffer* skinVertexBuffer() const {
+    return m_skinVBuf ? m_skinVBuf : m_vbuf;
+  }
+
   /// @brief 应用骨骼姿态（骨骼名 -> 局部变换），并重新计算蒙皮顶点
   void applyBonePoses(const QHash<QString, QMatrix4x4>& poses);
 
@@ -165,6 +188,7 @@ class RhiMesh {
   QRhiBuffer* m_lineIbuf = nullptr;
   QRhiBuffer* m_vnormalVbuf = nullptr;
   QRhiBuffer* m_fnormalVbuf = nullptr;
+  QRhiBuffer* m_skinVBuf = nullptr;
   QRhiBuffer* m_lodIbuf[kLodLevelCount] = {nullptr, nullptr};
 
   quint32 m_vbufCapacity = 0;
@@ -172,6 +196,7 @@ class RhiMesh {
   quint32 m_lineIbufCapacity = 0;
   quint32 m_vnormalCapacity = 0;
   quint32 m_fnormalCapacity = 0;
+  quint32 m_skinVCapacity = 0;
   quint32 m_lodIbufCapacity[kLodLevelCount] = {0, 0};
 
   CpuMesh m_baseData;   ///< 未变换的原始数据
@@ -193,6 +218,7 @@ class RhiMesh {
 
   // ── 骨骼蒙皮数据 ─────────────────────────────────────────
   bool m_skinned = false;
+  bool m_gpuSkin = false;
   QVector<CpuMesh::SkinVertex> m_skinWeights;
   QVector<QString> m_boneNames;
   QVector<QMatrix4x4> m_boneOffsets;

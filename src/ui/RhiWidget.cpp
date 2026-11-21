@@ -860,7 +860,10 @@ void RhiWidget::applyAnimationTime(float time) {
                 poses.insert(it.key(), it.value()->sample(time));
             }
             mesh->applyBonePoses(poses);
-            changed = true;
+            // GPU 蒙皮只需更新骨骼 UBO，无需重传顶点
+            if (!mesh->gpuSkinEnabled()) {
+                changed = true;
+            }
             continue;
         }
 

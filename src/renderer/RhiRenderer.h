@@ -91,6 +91,19 @@ struct alignas(16) PostUBOData {
   float padding1;
 };
 
+/// @brief GPU 蒙皮参数（与着色器 SkinUBO 一致）
+///
+/// bones 为骨骼蒙皮矩阵（含逆绑定矩阵）；objectMatrix 在蒙皮后应用，
+/// 用于保留逐对象的用户变换。骨骼数超过上限的对象回退到 CPU 蒙皮。
+struct alignas(16) SkinUBOData {
+  float bones[64][16];
+  float objectMatrix[16];
+  float objectNormalMatrix[16];
+  int boneCount = 0;
+  int skinEnabled = 0;
+  float padding[2] = {0.0f, 0.0f};
+};
+
 /// @brief 选择高亮颜色
 struct alignas(16) SelectionUBOData {
   float color[4];
@@ -290,6 +303,11 @@ class RhiRenderer {
         1, quint32(slot) * quint32(m_materialStride));
   }
 
+  QRhiCommandBuffer::DynamicOffset skinOffset(int slot) const {
+    return QRhiCommandBuffer::DynamicOffset(
+        4, quint32(slot) * quint32(m_skinStride));
+  }
+
   // ── 顶点布局 ──────────────────────────────────────────────
   static QRhiVertexInputLayout meshInputLayout();
   static QRhiVertexInputLayout lineInputLayout();
@@ -308,6 +326,9 @@ class RhiRenderer {
   QRhiBuffer* m_materialUBO = nullptr;
   int m_materialStride = 0;
   int m_materialSlots = 256;
+  QRhiBuffer* m_skinUBO = nullptr;
+  int m_skinStride = 0;
+  int m_skinSlots = 256;
   QRhiTexture* m_diffuseTexture = nullptr;
   QRhiSampler* m_diffuseSampler = nullptr;
   QImage m_diffuseImage;
@@ -429,6 +450,7 @@ class RhiRenderer {
   float m_slotProjScale[4] = {0.4f, 0.4f, 0.4f, 0.4f};
   int m_currentSlot = 0;
   QVector<int> m_meshMaterialSlot;     ///< 每个对象复用的材质槽位
+  QVector<int> m_meshSkinSlot;         ///< 每个对象的蒙皮槽位（0 = 无蒙皮）
   RenderStats m_stats;
 
   QVector3D m_bgTopColor{0.2f, 0.2f, 0.3f};

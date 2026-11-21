@@ -35,7 +35,10 @@ void RhiMesh::setTransform(const QMatrix4x4& transform) {
     m_userTransform = transform;
     m_transform = m_animDelta * m_userTransform;
     rebuildCpuData();
-    releaseGpu();
+    // GPU 蒙皮时顶点缓冲保存局部坐标，用户变换由 SkinUBO 提供
+    if (!m_gpuSkin) {
+        releaseGpu();
+    }
 }
 
 void RhiMesh::setAnimationDelta(const QMatrix4x4& delta) {
@@ -56,7 +59,9 @@ void RhiMesh::setAnimationDelta(const QMatrix4x4& delta) {
     m_animDelta = delta;
     m_transform = m_animDelta * m_userTransform;
     rebuildCpuData();
-    releaseGpu();
+    if (!m_gpuSkin) {
+        releaseGpu();
+    }
 }
 
 RhiMesh* RhiMesh::clone() const {
@@ -87,6 +92,9 @@ void RhiMesh::initSkinData(const CpuMesh& cpu) {
     m_bonePaths = cpu.bonePaths;
     m_boneRestLocals = cpu.boneRestLocals;
     m_boneMatrices = m_boneBindMatrices;
+    m_gpuSkin = !m_boneNames.isEmpty() &&
+                m_boneNames.size() <= kMaxGpuBones &&
+                m_boneOffsets.size() == m_boneNames.size();
     m_boneNormalMatrices.resize(m_boneMatrices.size());
     for (int i = 0; i < m_boneMatrices.size(); ++i) {
         m_boneNormalMatrices[i] = m_boneMatrices[i].inverted().transposed();
@@ -166,8 +174,10 @@ void RhiMesh::applyBonePoses(const QHash<QString, QMatrix4x4>& poses) {
         return;
     }
     updateBoneMatrices(&poses);
-    rebuildCpuData(false);
-    releaseGpu();
+    if (!m_gpuSkin) {
+        rebuildCpuData(false);
+        releaseGpu();
+    }
 }
 
 void RhiMesh::resetSkinPose() {
@@ -175,8 +185,10 @@ void RhiMesh::resetSkinPose() {
         return;
     }
     updateBoneMatrices(nullptr);
-    rebuildCpuData(false);
-    releaseGpu();
+    if (!m_gpuSkin) {
+        rebuildCpuData(false);
+        releaseGpu();
+    }
 }
 
 void RhiMesh::rebuildCpuData(bool updateDerived) {
@@ -404,13 +416,35 @@ void RhiMesh::upload(QRhiResourceUpdateBatch* batch) {
         return;
     }
 
-    const quint32 vbufSize = m_cpuData.vertices.size() * sizeof(CpuMesh::Vertex);
+    // GPU 蒙皮网格上传局部坐标；CPU 蒙皮/普通网格上传已变换坐标
+    const QVector<CpuMesh::Vertex>& gpuVertices =
+        m_gpuSkin ? m_baseData.vertices : m_cpuData.vertices;
+    const quint32 vbufSize = gpuVertices.size() * sizeof(CpuMesh::Vertex);
     const quint32 ibufSize = m_cpuData.indices.size() * sizeof(quint32);
 
     if (vbufSize > 0 && !m_vbuf) {
         m_vbuf = createBuffer(batch, QRhiBuffer::VertexBuffer,
-                              m_cpuData.vertices.constData(), vbufSize,
+                              gpuVertices.constData(), vbufSize,
                               &m_vbufCapacity);
+    }
+
+    if (m_gpuSkin && !m_skinVBuf) {
+        QVector<SkinGpuVertex> skinData;
+        skinData.reserve(m_skinWeights.size());
+        for (const CpuMesh::SkinVertex& skin : m_skinWeights) {
+            SkinGpuVertex vertex;
+            for (int k = 0; k < 4; ++k) {
+                vertex.boneIndex[k] = skin.boneIndex[k];
+                vertex.weight[k] = skin.weight[k];
+            }
+            skinData.append(vertex);
+        }
+        if (!skinData.isEmpty()) {
+            m_skinVBuf = createBuffer(
+                batch, QRhiBuffer::VertexBuffer, skinData.constData(),
+                quint32(skinData.size() * sizeof(SkinGpuVertex)),
+                &m_skinVCapacity);
+        }
     }
 
     if (ibufSize > 0 && !m_ibuf) {
@@ -458,6 +492,7 @@ void RhiMesh::releaseGpu() {
     destroyBuffer(&m_lineIbuf, QRhiBuffer::IndexBuffer, m_lineIbufCapacity);
     destroyBuffer(&m_vnormalVbuf, QRhiBuffer::VertexBuffer, m_vnormalCapacity);
     destroyBuffer(&m_fnormalVbuf, QRhiBuffer::VertexBuffer, m_fnormalCapacity);
+    destroyBuffer(&m_skinVBuf, QRhiBuffer::VertexBuffer, m_skinVCapacity);
     for (int level = 0; level < kLodLevelCount; ++level) {
         destroyBuffer(&m_lodIbuf[level], QRhiBuffer::IndexBuffer,
                       m_lodIbufCapacity[level]);
@@ -469,5 +504,6 @@ void RhiMesh::releaseGpu() {
     m_lineIbufCapacity = 0;
     m_vnormalCapacity = 0;
     m_fnormalCapacity = 0;
+    m_skinVCapacity = 0;
     m_uploaded = false;
 }

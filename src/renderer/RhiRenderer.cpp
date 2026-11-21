@@ -103,11 +103,14 @@ void RhiRenderer::rebuildPipelines() {
 
 QRhiVertexInputLayout RhiRenderer::meshInputLayout() {
     QRhiVertexInputLayout layout;
-    layout.setBindings({{sizeof(CpuMesh::Vertex)}});
+    layout.setBindings({{sizeof(CpuMesh::Vertex)},
+                        {sizeof(RhiMesh::SkinGpuVertex)}});
     layout.setAttributes({
         {0, 0, QRhiVertexInputAttribute::Float3, 0},
         {0, 1, QRhiVertexInputAttribute::Float3, 12},
         {0, 2, QRhiVertexInputAttribute::Float2, 24},
+        {1, 3, QRhiVertexInputAttribute::UInt4, 0},
+        {1, 4, QRhiVertexInputAttribute::Float4, 16},
     });
     return layout;
 }
@@ -195,6 +198,9 @@ void RhiRenderer::createBuffers(QRhiCommandBuffer* cb) {
                                   quint32(m_frameStride * m_frameSlots));
     m_materialUBO = m_rhi->newBuffer(QRhiBuffer::Dynamic, QRhiBuffer::UniformBuffer,
                                      quint32(m_materialStride * m_materialSlots));
+    m_skinStride = int(m_rhi->ubufAligned(sizeof(SkinUBOData)));
+    m_skinUBO = m_rhi->newBuffer(QRhiBuffer::Dynamic, QRhiBuffer::UniformBuffer,
+                                 quint32(m_skinStride * m_skinSlots));
     m_bgUBO = m_rhi->newBuffer(QRhiBuffer::Dynamic, QRhiBuffer::UniformBuffer,
                                sizeof(BackgroundUBOData));
     m_normalUBO = m_rhi->newBuffer(QRhiBuffer::Dynamic, QRhiBuffer::UniformBuffer,
@@ -216,6 +222,7 @@ void RhiRenderer::createBuffers(QRhiCommandBuffer* cb) {
 
     m_frameUBO->create();
     m_materialUBO->create();
+    m_skinUBO->create();
     m_bgUBO->create();
     m_normalUBO->create();
     m_clipUBO->create();
@@ -246,6 +253,7 @@ void RhiRenderer::createBuffers(QRhiCommandBuffer* cb) {
 void RhiRenderer::destroyBuffers() {
     delete m_frameUBO;
     delete m_materialUBO;
+    delete m_skinUBO;
     delete m_bgUBO;
     delete m_normalUBO;
     delete m_clipUBO;
@@ -262,6 +270,7 @@ void RhiRenderer::destroyBuffers() {
 
     m_frameUBO = nullptr;
     m_materialUBO = nullptr;
+    m_skinUBO = nullptr;
     m_bgUBO = nullptr;
     m_normalUBO = nullptr;
     m_clipUBO = nullptr;
@@ -594,6 +603,9 @@ void RhiRenderer::buildAllPipelines() {
             m_frameUBO, sizeof(FrameUBOData)),
         QRhiShaderResourceBinding::uniformBufferWithDynamicOffset(1, QRhiShaderResourceBinding::FragmentStage, m_materialUBO, sizeof(MaterialUBOData)),
             QRhiShaderResourceBinding::sampledTexture(3, QRhiShaderResourceBinding::FragmentStage, m_diffuseTexture, m_diffuseSampler),
+            QRhiShaderResourceBinding::uniformBufferWithDynamicOffset(
+                4, QRhiShaderResourceBinding::VertexStage, m_skinUBO,
+                sizeof(SkinUBOData)),
     });
     m_phongSrb->create();
 
@@ -610,6 +622,9 @@ void RhiRenderer::buildAllPipelines() {
         QRhiShaderResourceBinding::uniformBufferWithDynamicOffset(
             0, QRhiShaderResourceBinding::VertexStage | QRhiShaderResourceBinding::FragmentStage,
             m_frameUBO, sizeof(FrameUBOData)),
+        QRhiShaderResourceBinding::uniformBufferWithDynamicOffset(
+            4, QRhiShaderResourceBinding::VertexStage, m_skinUBO,
+            sizeof(SkinUBOData)),
     });
     m_wireframeSrb->create();
 
@@ -634,6 +649,9 @@ void RhiRenderer::buildAllPipelines() {
         QRhiShaderResourceBinding::uniformBufferWithDynamicOffset(
             0, QRhiShaderResourceBinding::VertexStage | QRhiShaderResourceBinding::FragmentStage,
             m_frameUBO, sizeof(FrameUBOData)),
+        QRhiShaderResourceBinding::uniformBufferWithDynamicOffset(
+            4, QRhiShaderResourceBinding::VertexStage, m_skinUBO,
+            sizeof(SkinUBOData)),
     });
     m_normalsSrb->create();
 
@@ -652,6 +670,9 @@ void RhiRenderer::buildAllPipelines() {
             m_frameUBO, sizeof(FrameUBOData)),
         QRhiShaderResourceBinding::uniformBufferWithDynamicOffset(1, QRhiShaderResourceBinding::FragmentStage, m_materialUBO, sizeof(MaterialUBOData)),
             QRhiShaderResourceBinding::sampledTexture(3, QRhiShaderResourceBinding::FragmentStage, m_diffuseTexture, m_diffuseSampler),
+            QRhiShaderResourceBinding::uniformBufferWithDynamicOffset(
+                4, QRhiShaderResourceBinding::VertexStage, m_skinUBO,
+                sizeof(SkinUBOData)),
     });
     m_flatSrb->create();
 
@@ -670,6 +691,9 @@ void RhiRenderer::buildAllPipelines() {
             m_frameUBO, sizeof(FrameUBOData)),
         QRhiShaderResourceBinding::uniformBufferWithDynamicOffset(1, QRhiShaderResourceBinding::FragmentStage, m_materialUBO, sizeof(MaterialUBOData)),
             QRhiShaderResourceBinding::sampledTexture(3, QRhiShaderResourceBinding::FragmentStage, m_diffuseTexture, m_diffuseSampler),
+            QRhiShaderResourceBinding::uniformBufferWithDynamicOffset(
+                4, QRhiShaderResourceBinding::VertexStage, m_skinUBO,
+                sizeof(SkinUBOData)),
     });
     m_pbrSrb->create();
 
@@ -725,9 +749,12 @@ void RhiRenderer::buildAllPipelines() {
     // ── 阴影 ────────────────────────────────────────────────
     if (m_shadowTexture && m_shadowRt && m_shadowRp) {
         m_shadowSrb = m_rhi->newShaderResourceBindings();
-        m_shadowSrb->setBindings({
+    m_shadowSrb->setBindings({
             QRhiShaderResourceBinding::uniformBuffer(0, QRhiShaderResourceBinding::VertexStage,
                                                      m_shadowUBO),
+            QRhiShaderResourceBinding::uniformBufferWithDynamicOffset(
+                4, QRhiShaderResourceBinding::VertexStage, m_skinUBO,
+                sizeof(SkinUBOData)),
         });
         m_shadowSrb->create();
 
@@ -753,6 +780,9 @@ void RhiRenderer::buildAllPipelines() {
                                                       m_shadowTexture, m_shadowSampler),
             QRhiShaderResourceBinding::sampledTexture(3, QRhiShaderResourceBinding::FragmentStage,
                                                       m_diffuseTexture, m_diffuseSampler),
+            QRhiShaderResourceBinding::uniformBufferWithDynamicOffset(
+                4, QRhiShaderResourceBinding::VertexStage, m_skinUBO,
+                sizeof(SkinUBOData)),
         });
         m_shadowedPhongSrb->create();
 
@@ -789,6 +819,9 @@ void RhiRenderer::buildAllPipelines() {
             0, QRhiShaderResourceBinding::VertexStage, m_frameUBO, sizeof(FrameUBOData)),
         QRhiShaderResourceBinding::uniformBuffer(1, QRhiShaderResourceBinding::FragmentStage,
                                                  m_selectionUBO),
+        QRhiShaderResourceBinding::uniformBufferWithDynamicOffset(
+            4, QRhiShaderResourceBinding::VertexStage, m_skinUBO,
+            sizeof(SkinUBOData)),
     });
     m_selectionSrb->create();
 
@@ -810,6 +843,9 @@ void RhiRenderer::buildAllPipelines() {
             m_frameUBO, sizeof(FrameUBOData)),
         QRhiShaderResourceBinding::uniformBufferWithDynamicOffset(1, QRhiShaderResourceBinding::FragmentStage, m_materialUBO, sizeof(MaterialUBOData)),
             QRhiShaderResourceBinding::sampledTexture(3, QRhiShaderResourceBinding::FragmentStage, m_diffuseTexture, m_diffuseSampler),
+            QRhiShaderResourceBinding::uniformBufferWithDynamicOffset(
+                4, QRhiShaderResourceBinding::VertexStage, m_skinUBO,
+                sizeof(SkinUBOData)),
         QRhiShaderResourceBinding::uniformBuffer(2, QRhiShaderResourceBinding::FragmentStage,
                                                  m_clipUBO),
     });
@@ -1270,12 +1306,8 @@ void RhiRenderer::drawMeshesIndexed(QRhiCommandBuffer* cb,
 
     beginSlot(slot);
 
-    if (!useMaterial) {
-        const auto offset = frameOffset(slot);
-        cb->setShaderResources(srb, 1, &offset);
-    }
-
     int lastMaterialSlot = -1;
+    int lastSkinSlot = -1;
 
     for (int i = 0; i < meshes.size(); ++i) {
         RhiMesh* mesh = meshes[i];
@@ -1285,15 +1317,23 @@ void RhiRenderer::drawMeshesIndexed(QRhiCommandBuffer* cb,
             continue;
         }
 
+        const int skinSlot = m_meshSkinSlot.value(i, 0);
+
         if (useMaterial) {
             const int materialSlot = m_meshMaterialSlot.value(i, i);
-            if (materialSlot != lastMaterialSlot) {
-                const QRhiCommandBuffer::DynamicOffset offsets[2] = {
-                    frameOffset(slot), materialOffset(materialSlot)};
-                cb->setShaderResources(srb, 2, offsets);
+            if (materialSlot != lastMaterialSlot || skinSlot != lastSkinSlot) {
+                const QRhiCommandBuffer::DynamicOffset offsets[3] = {
+                    frameOffset(slot), materialOffset(materialSlot),
+                    skinOffset(skinSlot)};
+                cb->setShaderResources(srb, 3, offsets);
                 lastMaterialSlot = materialSlot;
+                lastSkinSlot = skinSlot;
                 ++m_stats.materialBatches;
             }
+        } else {
+            const QRhiCommandBuffer::DynamicOffset offsets[2] = {
+                frameOffset(slot), skinOffset(skinSlot)};
+            cb->setShaderResources(srb, 2, offsets);
         }
 
         const int lod = lodLevelFor(mesh);
@@ -1308,8 +1348,11 @@ void RhiRenderer::drawMeshesIndexed(QRhiCommandBuffer* cb,
             continue;
         }
 
-        const QRhiCommandBuffer::VertexInput binding(mesh->vertexBuffer(), 0);
-        cb->setVertexInput(0, 1, &binding, indexBuffer, 0,
+        const QRhiCommandBuffer::VertexInput bindings[2] = {
+            {mesh->vertexBuffer(), 0},
+            {mesh->skinVertexBuffer(), 0},
+        };
+        cb->setVertexInput(0, 2, bindings, indexBuffer, 0,
                            QRhiCommandBuffer::IndexUInt32);
         cb->drawIndexed(indexCount);
 
@@ -1333,17 +1376,26 @@ void RhiRenderer::drawWireframe(QRhiCommandBuffer* cb,
         return;
     }
     beginSlot(slot);
-    const auto offset = frameOffset(slot);
-    cb->setShaderResources(srb, 1, &offset);
 
-    for (RhiMesh* mesh : meshes) {
-        if (isMeshCulled(mesh) || !mesh->vertexBuffer() ||
+    for (int i = 0; i < meshes.size(); ++i) {
+        RhiMesh* mesh = meshes[i];
+        if (!mesh || isMeshCulled(mesh) || !mesh->vertexBuffer() ||
             !mesh->lineIndexBuffer()) {
-            ++m_stats.culled;
+            if (mesh && mesh->isVisible()) {
+                ++m_stats.culled;
+            }
             continue;
         }
-        const QRhiCommandBuffer::VertexInput binding(mesh->vertexBuffer(), 0);
-        cb->setVertexInput(0, 1, &binding, mesh->lineIndexBuffer(), 0,
+
+        const QRhiCommandBuffer::DynamicOffset offsets[2] = {
+            frameOffset(slot), skinOffset(m_meshSkinSlot.value(i, 0))};
+        cb->setShaderResources(srb, 2, offsets);
+
+        const QRhiCommandBuffer::VertexInput bindings[2] = {
+            {mesh->vertexBuffer(), 0},
+            {mesh->skinVertexBuffer(), 0},
+        };
+        cb->setVertexInput(0, 2, bindings, mesh->lineIndexBuffer(), 0,
                            QRhiCommandBuffer::IndexUInt32);
         cb->drawIndexed(mesh->lineIndexCount());
         ++m_stats.drawn;
@@ -1472,14 +1524,21 @@ void RhiRenderer::renderShadowPass(QRhiCommandBuffer* cb,
     cb->beginPass(m_shadowRt, QColor(), QRhiDepthStencilClearValue(1.0f, 0), batch);
     cb->setViewport({0, 0, 2048.0f, 2048.0f});
     cb->setGraphicsPipeline(m_shadowPipeline);
-    cb->setShaderResources(m_shadowSrb);
 
-    for (RhiMesh* mesh : meshes) {
+    for (int i = 0; i < meshes.size(); ++i) {
+        RhiMesh* mesh = meshes[i];
         if (!mesh || !mesh->isVisible() || !mesh->vertexBuffer() || !mesh->indexBuffer()) {
             continue;
         }
-        const QRhiCommandBuffer::VertexInput binding(mesh->vertexBuffer(), 0);
-        cb->setVertexInput(0, 1, &binding, mesh->indexBuffer(), 0,
+        const QRhiCommandBuffer::DynamicOffset offset =
+            skinOffset(m_meshSkinSlot.value(i, 0));
+        cb->setShaderResources(m_shadowSrb, 1, &offset);
+
+        const QRhiCommandBuffer::VertexInput bindings[2] = {
+            {mesh->vertexBuffer(), 0},
+            {mesh->skinVertexBuffer(), 0},
+        };
+        cb->setVertexInput(0, 2, bindings, mesh->indexBuffer(), 0,
                            QRhiCommandBuffer::IndexUInt32);
         cb->drawIndexed(mesh->indexCount());
     }
@@ -1593,6 +1652,54 @@ void RhiRenderer::render(QRhiCommandBuffer* cb,
         m_slotEye[i] = camera.position();
         const float p11 = proj(1, 1);
         m_slotProjScale[i] = (qAbs(p11) > 1e-6f) ? 1.0f / qAbs(p11) : 0.4f;
+    }
+
+    // ── GPU 蒙皮槽位（必须在阴影 Pass 之前提交） ────────────
+    m_meshSkinSlot.resize(meshes.size());
+    m_meshSkinSlot.fill(0);
+
+    {
+        auto* skinBatch = m_rhi->nextResourceUpdateBatch();
+        int nextSkinSlot = 1;
+        SkinUBOData zeroSkin{};
+        skinBatch->updateDynamicBuffer(m_skinUBO, 0, sizeof(SkinUBOData),
+                                       &zeroSkin);
+
+        for (int i = 0; i < meshes.size(); ++i) {
+            RhiMesh* mesh = meshes[i];
+            if (!mesh || !mesh->gpuSkinEnabled()) {
+                continue;
+            }
+            if (nextSkinSlot >= m_skinSlots) {
+                break;
+            }
+
+            const int slot = nextSkinSlot++;
+            m_meshSkinSlot[i] = slot;
+
+            SkinUBOData data{};
+            const QVector<QMatrix4x4>& bones = mesh->boneMatrices();
+            const int boneCount = qMin(bones.size(), 64);
+            for (int b = 0; b < boneCount; ++b) {
+                std::memcpy(data.bones[b], bones[b].constData(),
+                            sizeof(float) * 16);
+            }
+
+            const QMatrix4x4 object = mesh->objectMatrix();
+            std::memcpy(data.objectMatrix, object.constData(),
+                        sizeof(float) * 16);
+            const QMatrix4x4 objectNormal = object.inverted().transposed();
+            std::memcpy(data.objectNormalMatrix, objectNormal.constData(),
+                        sizeof(float) * 16);
+
+            data.boneCount = boneCount;
+            data.skinEnabled = boneCount > 0 ? 1 : 0;
+            skinBatch->updateDynamicBuffer(
+                m_skinUBO, quint32(slot * m_skinStride), sizeof(SkinUBOData),
+                &data);
+        }
+
+        cb->resourceUpdate(skinBatch);
     }
 
     // ── 阴影矩阵 ────────────────────────────────────────────
@@ -1895,12 +2002,17 @@ void RhiRenderer::render(QRhiCommandBuffer* cb,
                 m_selectedMesh < meshes.size() && meshes[m_selectedMesh] &&
                 meshes[m_selectedMesh]->isVisible()) {
                 cb->setGraphicsPipeline(m_selectionPipeline);
-                const auto offset = frameOffset(0);
-                cb->setShaderResources(m_selectionSrb, 1, &offset);
+                const QRhiCommandBuffer::DynamicOffset offsets[2] = {
+                    frameOffset(0),
+                    skinOffset(m_meshSkinSlot.value(m_selectedMesh, 0))};
+                cb->setShaderResources(m_selectionSrb, 2, offsets);
                 RhiMesh* mesh = meshes[m_selectedMesh];
                 if (mesh->vertexBuffer() && mesh->indexBuffer()) {
-                    const QRhiCommandBuffer::VertexInput binding(mesh->vertexBuffer(), 0);
-                    cb->setVertexInput(0, 1, &binding, mesh->indexBuffer(), 0,
+                    const QRhiCommandBuffer::VertexInput bindings[2] = {
+                        {mesh->vertexBuffer(), 0},
+                        {mesh->skinVertexBuffer(), 0},
+                    };
+                    cb->setVertexInput(0, 2, bindings, mesh->indexBuffer(), 0,
                                        QRhiCommandBuffer::IndexUInt32);
                     cb->drawIndexed(mesh->indexCount());
                 }
