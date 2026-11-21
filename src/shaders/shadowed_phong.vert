@@ -19,11 +19,13 @@ layout(std140, binding = 0) uniform FrameUBO {
 layout(location = 0) out vec3 fragPos;
 layout(location = 1) out vec3 fragNormal;
 layout(location = 2) out vec4 vLightClip;
+layout(location = 3) out vec2 vTexCoord;
 
 void main() {
     vec4 worldPos = model * vec4(inPosition, 1.0);
     fragPos       = worldPos.xyz;
     fragNormal    = mat3(normalMatrix) * inNormal;
     vLightClip    = shadowBias * lightSpace * worldPos;
+    vTexCoord     = inTexCoord;
     gl_Position   = projection * view * worldPos;
 }

@@ -3,7 +3,10 @@
 // 基于物理的 Cook-Torrance 光照（解析光源，无贴图）
 layout(location = 0) in  vec3 fragPos;
 layout(location = 1) in  vec3 fragNormal;
+layout(location = 2) in  vec2 vTexCoord;
 layout(location = 0) out vec4 outColor;
+
+layout(binding = 3) uniform sampler2D diffuseMap;
 
 layout(std140, binding = 0) uniform FrameUBO {
     mat4 model; mat4 view; mat4 projection; mat4 normalMatrix;
@@ -44,6 +47,18 @@ vec3 FresnelSchlick(float cosTheta, vec3 F0) {
     return F0 + (1.0 - F0) * pow(clamp(1.0 - cosTheta, 0.0, 1.0), 5.0);
 }
 
+// 程序化环境（与天空盒一致的天空/地面渐变），用作简易 IBL
+vec3 environmentColor(vec3 dir) {
+    float t = clamp(dir.y, -1.0, 1.0);
+    vec3 horizon = vec3(0.55, 0.62, 0.72);
+    vec3 zenith  = vec3(0.15, 0.28, 0.55);
+    vec3 ground  = vec3(0.16, 0.15, 0.14);
+    vec3 color = (t >= 0.0) ? mix(horizon, zenith, pow(t, 0.8))
+                            : mix(horizon, ground, pow(-t, 0.8));
+    float sun = pow(max(dot(dir, normalize(vec3(0.5, 0.7, 0.4))), 0.0), 256.0);
+    return color + vec3(1.0, 0.9, 0.7) * sun;
+}
+
 void main() {
     vec3 N = normalize(fragNormal);
     vec3 V = normalize(viewPos - fragPos);
@@ -53,7 +68,9 @@ void main() {
     float rough = clamp(roughness, 0.05, 1.0);
     float metal = clamp(metallic, 0.0, 1.0);
 
-    vec3  F0  = mix(vec3(0.04), diffuse, metal);
+    vec3 baseColor = diffuse * texture(diffuseMap, vTexCoord).rgb;
+    vec3 F0 = mix(vec3(0.04), baseColor, metal);
+
     float NDF = DistributionGGX(N, H, rough);
     float G   = GeometrySmith(N, V, L, rough);
     vec3  F   = FresnelSchlick(max(dot(H, V), 0.0), F0);
@@ -66,15 +83,21 @@ void main() {
     vec3 kD = (vec3(1.0) - kS) * (1.0 - metal);
 
     float NdotL = max(dot(N, L), 0.0);
+    float NdotV = max(dot(N, V), 0.0);
     vec3 radiance = lightColor;
 
-    vec3 Lo = (kD * diffuse / PI + specularTerm) * radiance * NdotL;
+    vec3 Lo = (kD * baseColor / PI + specularTerm) * radiance * NdotL;
 
-    // 简易环境项，避免背光面全黑
-    vec3 ambientTerm = ambient * diffuse * lightColor;
+    // 简易 IBL：环境漫反射 + 环境镜面反射
+    vec3 irradiance = environmentColor(N);
+    vec3 reflection = environmentColor(reflect(-V, N));
+    vec3 Fr = F0 + (max(vec3(1.0 - rough), F0) - F0) *
+                     pow(clamp(1.0 - NdotV, 0.0, 1.0), 5.0);
+    vec3 kDr = (vec3(1.0) - Fr) * (1.0 - metal);
+    vec3 ambientTerm = kDr * baseColor * irradiance + Fr * reflection;
 
     vec3 color = ambientTerm + Lo;
-    color *= 3.5;                            // 曝光补偿
-    color = color / (color + vec3(1.0));    // Reinhard 色调映射
+    color *= 2.0;
+    color = color / (color + vec3(1.0));
     outColor = vec4(color, 1.0);
 }

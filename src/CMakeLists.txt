@@ -51,14 +51,21 @@ qt_add_shaders(ModelViewer "shaders"
     shaders/selection.frag
     shaders/clipped_mesh.vert
     shaders/clipped_mesh.frag
+    shaders/cap.vert
+    shaders/cap.frag
+    shaders/text3d.vert
+    shaders/text3d.frag
     shaders/splitScreen.vert
     shaders/splitScreen.frag
+    shaders/post.vert
+    shaders/post.frag
     shaders/axis.vert
     shaders/axis.frag
 )
 
 target_link_libraries(ModelViewer PRIVATE
     Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Concurrent Qt6::ShaderTools Qt6::GuiPrivate
+    Qt6::Qml
     assimp::assimp
 )
 

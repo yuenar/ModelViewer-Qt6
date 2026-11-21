@@ -12,7 +12,9 @@
 #include <QTimer>
 #include <QCursor>
 #include <QDebug>
+#include <QHash>
 #include <QtMath>
+#include <cmath>
 #include <limits>
 
 namespace {
@@ -77,6 +79,10 @@ class HudOverlay : public QWidget {
                          .arg(m_owner->isAxisVisible() ? "on" : "off",
                               m_owner->isGridVisible() ? "on" : "off",
                               m_owner->isMultiView() ? "on" : "off"));
+    y += lineHeight;
+
+    painter.drawText(area.adjusted(0, y, 0, 0), Qt::AlignLeft | Qt::AlignTop,
+                     m_owner->renderStatsText());
   }
 
  private:
@@ -91,8 +97,12 @@ RhiWidget::RhiWidget(QWidget* parent)
     m_fpsTimer.start();
 
     m_hud = new HudOverlay(this);
-    m_hud->setGeometry(10, 10, 400, 84);
+    m_hud->setGeometry(10, 10, 400, 100);
     m_hud->raise();
+
+    m_animTimer = new QTimer(this);
+    m_animTimer->setInterval(16);
+    connect(m_animTimer, &QTimer::timeout, this, &RhiWidget::advanceAnimation);
 
     updateCursorForTool();
 }
@@ -104,19 +114,22 @@ RhiWidget::~RhiWidget() {
 }
 
 void RhiWidget::releaseResources() {
-    delete m_renderer;
-    m_renderer = nullptr;
-
     for (RhiMesh* mesh : m_meshes) {
         if (mesh) {
+            mesh->setBufferPool(nullptr);
             mesh->releaseGpu();
         }
     }
+
+    delete m_renderer;
+    m_renderer = nullptr;
 }
 
 void RhiWidget::initialize(QRhiCommandBuffer* cb) {
     if (!m_renderer) {
         m_renderer = new RhiRenderer(rhi(), renderTarget());
+        m_renderer->setDiffuseTexture(m_pendingDiffuseTexture);
+        m_renderer->setPostProcessing(m_fxaaEnabled, m_aoEnabled);
         m_renderer->initialize(cb);
         m_renderer->setBackgroundColors(m_bgTopColor, m_bgBotColor);
         m_renderer->setNormalLength(qMax(m_sceneBbox.radius() * 0.15f, 0.05f));
@@ -127,6 +140,8 @@ void RhiWidget::initialize(QRhiCommandBuffer* cb) {
         m_renderer->setMultiView(m_multiView);
         m_renderer->setAxisVisible(m_axisVisible);
         m_renderer->setGridVisible(m_gridVisible);
+        m_renderer->setCullingEnabled(m_cullEnabled);
+        m_renderer->setLodEnabled(m_lodEnabled);
     } else {
         m_renderer->setRenderTarget(renderTarget());
         m_renderer->rebuildPipelines();
@@ -156,7 +171,7 @@ void RhiWidget::render(QRhiCommandBuffer* cb) {
 void RhiWidget::resizeEvent(QResizeEvent* event) {
     QRhiWidget::resizeEvent(event);
     if (m_hud) {
-        m_hud->setGeometry(10, 10, qMin(400, width() - 20), 84);
+        m_hud->setGeometry(10, 10, qMin(400, width() - 20), 100);
         m_hud->raise();
     }
 }
@@ -176,11 +191,20 @@ void RhiWidget::loadModel(const QString& filePath) {
     }
 
     ModelLoader loader;
-    const QVector<CpuMesh> cpuMeshes = loader.loadCPU(filePath);
-    setCPUMeshes(cpuMeshes, filePath);
+    const ModelAsset asset = loader.loadCPU(filePath);
+    setCPUMeshes(asset.meshes, filePath);
+    setAnimationClips(asset.animations);
 }
 
 void RhiWidget::setCPUMeshes(const QVector<CpuMesh>& meshes, const QString& label) {
+    m_animationClips.clear();
+    m_animClip = -1;
+    m_animTime = 0.0f;
+    m_animPlaying = false;
+    if (m_animTimer) {
+        m_animTimer->stop();
+    }
+
     for (RhiMesh* mesh : m_meshes) {
         delete mesh;
     }
@@ -202,6 +226,17 @@ void RhiWidget::setCPUMeshes(const QVector<CpuMesh>& meshes, const QString& labe
 
     if (!meshes.isEmpty()) {
         m_material.diffuse = meshes.first().baseColor;
+    }
+
+    m_pendingDiffuseTexture = QImage();
+    for (const CpuMesh& cpuMesh : meshes) {
+        if (!cpuMesh.diffuseTexture.isNull()) {
+            m_pendingDiffuseTexture = cpuMesh.diffuseTexture;
+            break;
+        }
+    }
+    if (m_renderer) {
+        m_renderer->setDiffuseTexture(m_pendingDiffuseTexture);
     }
 
     m_camera.fitToView(m_sceneBbox);
@@ -315,6 +350,67 @@ void RhiWidget::swapMeshVisibility() {
     update();
 }
 
+bool RhiWidget::removeMeshAt(int index) {
+    if (index < 0 || index >= m_meshes.size() || !m_meshes[index]) {
+        return false;
+    }
+
+    RhiMesh* mesh = m_meshes.takeAt(index);
+    if (m_renderer) {
+        mesh->setBufferPool(nullptr);
+    }
+    delete mesh;
+
+    if (m_selectedMesh == index) {
+        m_selectedMesh = -1;
+    } else if (m_selectedMesh > index) {
+        --m_selectedMesh;
+    }
+
+    m_sceneBbox = BoundingBox();
+    for (const RhiMesh* item : m_meshes) {
+        if (item) {
+            m_sceneBbox.expand(item->cpuMesh().bbox);
+        }
+    }
+
+    if (m_renderer) {
+        m_renderer->setSelectedMesh(m_selectedMesh);
+        m_renderer->resetMeshUploadFlag();
+    }
+    emit meshesChanged();
+    update();
+    return true;
+}
+
+int RhiWidget::duplicateMeshAt(int index) {
+    if (index < 0 || index >= m_meshes.size() || !m_meshes[index]) {
+        return -1;
+    }
+
+    RhiMesh* copy = m_meshes[index]->clone();
+    copy->setName(m_meshes[index]->name() + " Copy");
+    m_meshes.insert(index + 1, copy);
+
+    if (m_renderer) {
+        m_renderer->resetMeshUploadFlag();
+    }
+    emit meshesChanged();
+    update();
+    return index + 1;
+}
+
+bool RhiWidget::renameMeshAt(int index, const QString& name) {
+    if (index < 0 || index >= m_meshes.size() || !m_meshes[index] ||
+        name.trimmed().isEmpty()) {
+        return false;
+    }
+    m_meshes[index]->setName(name.trimmed());
+    emit meshesChanged();
+    update();
+    return true;
+}
+
 void RhiWidget::setRenderMode(int mode) {
     m_renderMode = mode;
     if (m_renderer) {
@@ -341,7 +437,28 @@ void RhiWidget::setMultiView(bool enabled) {
 
 void RhiWidget::setMaterial(const Material& mat) {
     m_material = mat;
+    for (RhiMesh* mesh : m_meshes) {
+        if (mesh) {
+            mesh->setMaterial(mat);
+        }
+    }
     update();
+}
+
+void RhiWidget::setMeshMaterial(int index, const Material& mat) {
+    if (index < 0 || index >= m_meshes.size() || !m_meshes[index]) {
+        return;
+    }
+    m_meshes[index]->setMaterial(mat);
+    m_material = mat;
+    update();
+}
+
+Material RhiWidget::meshMaterial(int index) const {
+    if (index < 0 || index >= m_meshes.size() || !m_meshes[index]) {
+        return m_material;
+    }
+    return m_meshes[index]->material();
 }
 
 void RhiWidget::applyMaterialPreset(const QString& name) {
@@ -378,6 +495,7 @@ void RhiWidget::applyMaterialPreset(const QString& name) {
             m_material.shininess = preset.shininess;
             m_material.metallic = preset.metallic;
             m_material.roughness = preset.roughness;
+            setMaterial(m_material);
             update();
             return;
         }
@@ -527,6 +645,213 @@ QString RhiWidget::displayStyleName() const {
         return QString::fromLatin1(names[m_displayStyle]);
     }
     return "Unknown";
+}
+
+QString RhiWidget::renderStatsText() const {
+    if (!m_renderer) {
+        return QString();
+    }
+    const RenderStats& stats = m_renderer->stats();
+    return QString("Draw: %1  Cull: %2  LOD: %3/%4/%5  Pool: %6")
+        .arg(stats.drawn)
+        .arg(stats.culled)
+        .arg(stats.lod0)
+        .arg(stats.lod1)
+        .arg(stats.lod2)
+        .arg(stats.pooledBuffers);
+}
+
+void RhiWidget::setCullingEnabled(bool enabled) {
+    m_cullEnabled = enabled;
+    if (m_renderer) {
+        m_renderer->setCullingEnabled(enabled);
+    }
+    update();
+}
+
+void RhiWidget::setLodEnabled(bool enabled) {
+    m_lodEnabled = enabled;
+    if (m_renderer) {
+        m_renderer->setLodEnabled(enabled);
+    }
+    update();
+}
+
+void RhiWidget::setMsaaSampleCount(int samples) {
+    samples = qBound(1, samples, 8);
+    if (sampleCount() == samples) {
+        return;
+    }
+
+    // MSAA 与后处理互斥：开启 MSAA 时自动关闭离屏后处理
+    if (samples > 1 && (m_fxaaEnabled || m_aoEnabled)) {
+        m_fxaaEnabled = false;
+        m_aoEnabled = false;
+        if (m_renderer) {
+            m_renderer->setPostProcessing(false, false);
+        }
+    }
+
+    QRhiWidget::setSampleCount(samples);
+    update();
+}
+
+void RhiWidget::setPostProcessing(bool fxaa, bool ao) {
+    m_fxaaEnabled = fxaa;
+    m_aoEnabled = ao;
+
+    if (fxaa || ao) {
+        if (sampleCount() > 1) {
+            QRhiWidget::setSampleCount(1);
+        }
+    }
+
+    if (m_renderer) {
+        m_renderer->setPostProcessing(fxaa, ao);
+    }
+    update();
+}
+
+void RhiWidget::setAnimationClips(const QVector<AnimationClip>& clips) {
+    m_animationClips = clips;
+    m_animClip = clips.isEmpty() ? -1 : 0;
+    m_animTime = 0.0f;
+    m_animPlaying = false;
+    if (m_animTimer) {
+        m_animTimer->stop();
+    }
+}
+
+QString RhiWidget::animationName(int index) const {
+    if (index < 0 || index >= m_animationClips.size()) {
+        return QString();
+    }
+    return m_animationClips[index].name;
+}
+
+float RhiWidget::animationDuration(int index) const {
+    if (index < 0 || index >= m_animationClips.size()) {
+        return 0.0f;
+    }
+    return m_animationClips[index].duration;
+}
+
+void RhiWidget::playAnimation(int index) {
+    if (index < 0 || index >= m_animationClips.size()) {
+        return;
+    }
+    if (index != m_animClip) {
+        m_animClip = index;
+        m_animTime = 0.0f;
+    }
+    m_animPlaying = true;
+    m_animClock.restart();
+    if (m_animTimer) {
+        m_animTimer->start();
+    }
+    applyAnimationTime(m_animTime);
+}
+
+void RhiWidget::pauseAnimation() {
+    m_animPlaying = false;
+    if (m_animTimer) {
+        m_animTimer->stop();
+    }
+}
+
+void RhiWidget::stopAnimation() {
+    m_animPlaying = false;
+    if (m_animTimer) {
+        m_animTimer->stop();
+    }
+    m_animTime = 0.0f;
+    resetAnimationDeltas();
+}
+
+void RhiWidget::setAnimationTime(float seconds) {
+    if (m_animClip < 0 || m_animClip >= m_animationClips.size()) {
+        return;
+    }
+    const float duration = m_animationClips[m_animClip].duration;
+    m_animTime = qBound(0.0f, seconds, qMax(duration, 0.0f));
+    applyAnimationTime(m_animTime);
+}
+
+void RhiWidget::advanceAnimation() {
+    if (!m_animPlaying || m_animClip < 0 ||
+        m_animClip >= m_animationClips.size()) {
+        return;
+    }
+
+    const float deltaSeconds = float(m_animClock.restart()) / 1000.0f;
+    const float duration = m_animationClips[m_animClip].duration;
+    m_animTime += deltaSeconds * m_animSpeed;
+    if (duration > 1e-4f) {
+        m_animTime = std::fmod(m_animTime, duration);
+        if (m_animTime < 0.0f) {
+            m_animTime += duration;
+        }
+    } else {
+        m_animTime = 0.0f;
+    }
+
+    applyAnimationTime(m_animTime);
+}
+
+void RhiWidget::applyAnimationTime(float time) {
+    if (m_animClip < 0 || m_animClip >= m_animationClips.size()) {
+        return;
+    }
+
+    const AnimationClip& clip = m_animationClips[m_animClip];
+    QHash<QString, const AnimationChannel*> channels;
+    channels.reserve(clip.channels.size());
+    for (const AnimationChannel& channel : clip.channels) {
+        channels.insert(channel.nodeName, &channel);
+    }
+
+    bool changed = false;
+    for (RhiMesh* mesh : m_meshes) {
+        if (!mesh) {
+            continue;
+        }
+        const CpuMesh& base = mesh->baseMesh();
+        if (base.nodePath.isEmpty()) {
+            continue;
+        }
+
+        QMatrix4x4 world;
+        for (int i = 0; i < base.nodePath.size(); ++i) {
+            const QMatrix4x4 rest =
+                (i < base.nodeRestLocals.size()) ? base.nodeRestLocals[i]
+                                                 : QMatrix4x4();
+            auto it = channels.constFind(base.nodePath[i]);
+            world *= (it != channels.constEnd()) ? it.value()->sample(time)
+                                                 : rest;
+        }
+
+        mesh->setAnimationDelta(world * base.restWorld.inverted());
+        changed = true;
+    }
+
+    if (changed && m_renderer) {
+        m_renderer->resetMeshUploadFlag();
+    }
+    update();
+}
+
+void RhiWidget::resetAnimationDeltas() {
+    bool changed = false;
+    for (RhiMesh* mesh : m_meshes) {
+        if (mesh && !mesh->animationDelta().isIdentity()) {
+            mesh->setAnimationDelta(QMatrix4x4());
+            changed = true;
+        }
+    }
+    if (changed && m_renderer) {
+        m_renderer->resetMeshUploadFlag();
+    }
+    update();
 }
 
 QVector3D RhiWidget::unproject(const QPoint& pos, float ndcZ) const {

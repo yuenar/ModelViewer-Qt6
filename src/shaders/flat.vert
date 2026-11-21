@@ -15,9 +15,11 @@ layout(std140, binding = 0) uniform FrameUBO {
 };
 
 layout(location = 0) out vec3 fragPos;
+layout(location = 1) out vec2 vTexCoord;
 
 void main() {
     vec4 worldPos = model * vec4(inPosition, 1.0);
     fragPos       = worldPos.xyz;
+    vTexCoord     = inTexCoord;
     gl_Position   = projection * view * worldPos;
 }

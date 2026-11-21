@@ -4,7 +4,11 @@
 #include <QColor>
 #include <QDebug>
 #include <QFile>
+#include <QFont>
+#include <QHash>
+#include <QPainter>
 #include <QtMath>
+#include <algorithm>
 #include <cstring>
 
 namespace {
@@ -12,6 +16,14 @@ namespace {
 struct AxisVertex {
     QVector3D position;
     QVector3D color;
+};
+
+struct LabelVertex {
+    QVector3D center;
+    QVector2D corner;
+    QVector2D uv;
+    QVector3D color;
+    float scale;
 };
 
 void copyMatrix(float dst[16], const QMatrix4x4& m) {
@@ -49,16 +61,30 @@ void RhiRenderer::initialize(QRhiCommandBuffer* cb) {
     createBuffers(cb);
     createShadowResources();
     createSkyboxGeometry(cb);
+    createDiffuseTexture();
+    createLabelResources(cb);
+
+    if (isPostEnabled()) {
+        ensureSceneTarget(m_rt->pixelSize());
+        m_pipelineRp = m_sceneRp;
+    } else {
+        m_pipelineRp = nullptr;
+    }
     buildAllPipelines();
 
+    m_diffuseDirty = false;
     m_initialized = true;
 }
 
 void RhiRenderer::releaseResources() {
     destroyPipelines();
+    destroySceneTarget();
     destroySkyboxGeometry();
     destroyShadowResources();
+    destroyDiffuseTexture();
+    destroyLabelResources();
     destroyBuffers();
+    m_bufferPool.clear();
     m_initialized = false;
     m_meshesUploaded = false;
 }
@@ -132,8 +158,19 @@ QRhiGraphicsPipeline* RhiRenderer::createPipeline(const PipelineDesc& desc) {
     });
     pipeline->setVertexInputLayout(desc.layout);
     pipeline->setShaderResourceBindings(desc.srb);
-    pipeline->setRenderPassDescriptor(desc.renderPass ? desc.renderPass
-                                                      : m_rt->renderPassDescriptor());
+    QRhiRenderPassDescriptor* renderPass =
+        desc.renderPass ? desc.renderPass
+                        : (m_pipelineRp ? m_pipelineRp
+                                        : m_rt->renderPassDescriptor());
+    pipeline->setRenderPassDescriptor(renderPass);
+    // 离屏场景通道固定为单采样；直接渲染时使用交换链的采样数（MSAA）
+    const int sampleCount =
+        desc.sampleCount >= 0
+            ? desc.sampleCount
+            : ((m_pipelineRp && m_pipelineRp == m_sceneRp)
+                   ? 1
+                   : m_rt->sampleCount());
+    pipeline->setSampleCount(sampleCount);
     pipeline->setTopology(desc.topology);
     pipeline->setDepthTest(desc.depthTest);
     pipeline->setDepthWrite(desc.depthWrite);
@@ -150,12 +187,14 @@ QRhiGraphicsPipeline* RhiRenderer::createPipeline(const PipelineDesc& desc) {
 }
 
 void RhiRenderer::createBuffers(QRhiCommandBuffer* cb) {
+    m_bufferPool.setRhi(m_rhi);
     m_frameStride = int(m_rhi->ubufAligned(sizeof(FrameUBOData)));
+    m_materialStride = int(m_rhi->ubufAligned(sizeof(MaterialUBOData)));
 
     m_frameUBO = m_rhi->newBuffer(QRhiBuffer::Dynamic, QRhiBuffer::UniformBuffer,
                                   quint32(m_frameStride * m_frameSlots));
     m_materialUBO = m_rhi->newBuffer(QRhiBuffer::Dynamic, QRhiBuffer::UniformBuffer,
-                                     sizeof(MaterialUBOData));
+                                     quint32(m_materialStride * m_materialSlots));
     m_bgUBO = m_rhi->newBuffer(QRhiBuffer::Dynamic, QRhiBuffer::UniformBuffer,
                                sizeof(BackgroundUBOData));
     m_normalUBO = m_rhi->newBuffer(QRhiBuffer::Dynamic, QRhiBuffer::UniformBuffer,
@@ -170,6 +209,10 @@ void RhiRenderer::createBuffers(QRhiCommandBuffer* cb) {
                                    sizeof(SkyboxUBOData));
     m_bgVBuf = m_rhi->newBuffer(QRhiBuffer::Immutable, QRhiBuffer::VertexBuffer,
                                 6 * 2 * sizeof(float));
+    m_postUBO = m_rhi->newBuffer(QRhiBuffer::Dynamic, QRhiBuffer::UniformBuffer,
+                                 sizeof(PostUBOData));
+    m_postVBuf = m_rhi->newBuffer(QRhiBuffer::Immutable, QRhiBuffer::VertexBuffer,
+                                  6 * 2 * sizeof(float));
 
     m_frameUBO->create();
     m_materialUBO->create();
@@ -180,8 +223,14 @@ void RhiRenderer::createBuffers(QRhiCommandBuffer* cb) {
     m_shadowUBO->create();
     m_skyboxUBO->create();
     m_bgVBuf->create();
+    m_postUBO->create();
+    m_postVBuf->create();
 
     static const float bgVerts[] = {
+        -1.0f, -1.0f,  1.0f, -1.0f, -1.0f, 1.0f,
+        -1.0f,  1.0f,  1.0f, -1.0f,  1.0f, 1.0f,
+    };
+    static const float postVerts[] = {
         -1.0f, -1.0f,  1.0f, -1.0f, -1.0f, 1.0f,
         -1.0f,  1.0f,  1.0f, -1.0f,  1.0f, 1.0f,
     };
@@ -189,6 +238,7 @@ void RhiRenderer::createBuffers(QRhiCommandBuffer* cb) {
     if (cb) {
         auto* batch = m_rhi->nextResourceUpdateBatch();
         batch->uploadStaticBuffer(m_bgVBuf, bgVerts);
+        batch->uploadStaticBuffer(m_postVBuf, postVerts);
         cb->resourceUpdate(batch);
     }
 }
@@ -205,6 +255,10 @@ void RhiRenderer::destroyBuffers() {
     delete m_bgVBuf;
     delete m_axisVBuf;
     delete m_gridVBuf;
+    delete m_capVBuf;
+    delete m_labelVBuf;
+    delete m_postUBO;
+    delete m_postVBuf;
 
     m_frameUBO = nullptr;
     m_materialUBO = nullptr;
@@ -217,8 +271,14 @@ void RhiRenderer::destroyBuffers() {
     m_bgVBuf = nullptr;
     m_axisVBuf = nullptr;
     m_gridVBuf = nullptr;
+    m_capVBuf = nullptr;
+    m_labelVBuf = nullptr;
+    m_postUBO = nullptr;
+    m_postVBuf = nullptr;
     m_axisVertexCount = 0;
     m_gridVertexCount = 0;
+    m_capVertexCount = 0;
+    m_labelVertexCount = 0;
 }
 
 void RhiRenderer::createShadowResources() {
@@ -294,6 +354,219 @@ void RhiRenderer::destroySkyboxGeometry() {
     m_skyboxVBuf = nullptr;
 }
 
+void RhiRenderer::createDiffuseTexture() {
+    destroyDiffuseTexture();
+
+    QImage image = m_diffuseImage;
+    if (image.isNull()) {
+        image = QImage(1, 1, QImage::Format_RGBA8888);
+        image.fill(Qt::white);
+    } else {
+        image = image.convertToFormat(QImage::Format_RGBA8888);
+    }
+
+    m_diffuseTexture = m_rhi->newTexture(QRhiTexture::RGBA8, image.size(), 1);
+    m_diffuseTexture->create();
+
+    m_diffuseSampler = m_rhi->newSampler(QRhiSampler::Linear, QRhiSampler::Linear,
+                                         QRhiSampler::Linear, QRhiSampler::Repeat,
+                                         QRhiSampler::Repeat);
+    m_diffuseSampler->create();
+
+    m_diffuseUploadPending = true;
+}
+
+void RhiRenderer::destroyDiffuseTexture() {
+    delete m_diffuseSampler;
+    delete m_diffuseTexture;
+    m_diffuseSampler = nullptr;
+    m_diffuseTexture = nullptr;
+    m_diffuseUploadPending = false;
+}
+
+void RhiRenderer::setDiffuseTexture(const QImage& image) {
+    m_diffuseImage = image;
+    m_diffuseDirty = true;
+}
+
+void RhiRenderer::setPostProcessing(bool fxaa, bool ao, float aoStrength) {
+    m_aoStrength = aoStrength;
+    if (m_fxaaEnabled == fxaa && m_aoEnabled == ao) {
+        return;
+    }
+
+    m_fxaaEnabled = fxaa;
+    m_aoEnabled = ao;
+
+    if (!m_initialized || !m_rhi || !m_rt) {
+        return;
+    }
+
+    destroyPipelines();
+    if (isPostEnabled()) {
+        ensureSceneTarget(m_rt->pixelSize());
+        m_pipelineRp = m_sceneRp;
+    } else {
+        m_pipelineRp = nullptr;
+        destroySceneTarget();
+    }
+    buildAllPipelines();
+}
+
+void RhiRenderer::ensureSceneTarget(const QSize& size) {
+    if (!m_rhi || size.isEmpty()) {
+        return;
+    }
+    if (m_sceneRt && m_sceneSize == size && m_sceneColor && m_sceneDepth) {
+        return;
+    }
+
+    destroySceneTarget();
+
+    m_sceneColor = m_rhi->newTexture(QRhiTexture::RGBA8, size, 1,
+                                     QRhiTexture::RenderTarget);
+    m_sceneDepth = m_rhi->newTexture(QRhiTexture::D32F, size, 1,
+                                     QRhiTexture::RenderTarget);
+
+    if (!m_sceneColor->create() || !m_sceneDepth->create()) {
+        qWarning() << "Failed to create post-processing scene textures";
+        destroySceneTarget();
+        return;
+    }
+
+    m_sceneColorSampler = m_rhi->newSampler(
+        QRhiSampler::Linear, QRhiSampler::Linear, QRhiSampler::None,
+        QRhiSampler::ClampToEdge, QRhiSampler::ClampToEdge);
+    m_sceneDepthSampler = m_rhi->newSampler(
+        QRhiSampler::Nearest, QRhiSampler::Nearest, QRhiSampler::None,
+        QRhiSampler::ClampToEdge, QRhiSampler::ClampToEdge);
+    m_sceneColorSampler->create();
+    m_sceneDepthSampler->create();
+
+    QRhiTextureRenderTargetDescription rtDesc;
+    rtDesc.setColorAttachments({QRhiColorAttachment(m_sceneColor)});
+    rtDesc.setDepthTexture(m_sceneDepth);
+
+    m_sceneRt = m_rhi->newTextureRenderTarget(rtDesc);
+    m_sceneRp = m_sceneRt->newCompatibleRenderPassDescriptor();
+    m_sceneRt->setRenderPassDescriptor(m_sceneRp);
+    if (!m_sceneRt->create()) {
+        qWarning() << "Failed to create post-processing render target";
+        destroySceneTarget();
+        return;
+    }
+
+    m_sceneSize = size;
+}
+
+void RhiRenderer::destroySceneTarget() {
+    delete m_sceneRt;
+    delete m_sceneRp;
+    delete m_sceneColorSampler;
+    delete m_sceneDepthSampler;
+    delete m_sceneColor;
+    delete m_sceneDepth;
+
+    m_sceneRt = nullptr;
+    m_sceneRp = nullptr;
+    m_sceneColorSampler = nullptr;
+    m_sceneDepthSampler = nullptr;
+    m_sceneColor = nullptr;
+    m_sceneDepth = nullptr;
+    m_sceneSize = QSize();
+}
+
+void RhiRenderer::createPostResources() {
+    if (!isPostEnabled() || !m_sceneRt || !m_postUBO ||
+        !m_sceneColor || !m_sceneDepth) {
+        return;
+    }
+
+    m_postSrb = m_rhi->newShaderResourceBindings();
+    m_postSrb->setBindings({
+        QRhiShaderResourceBinding::uniformBuffer(
+            0, QRhiShaderResourceBinding::VertexStage |
+                   QRhiShaderResourceBinding::FragmentStage,
+            m_postUBO),
+        QRhiShaderResourceBinding::sampledTexture(
+            1, QRhiShaderResourceBinding::FragmentStage, m_sceneColor,
+            m_sceneColorSampler),
+        QRhiShaderResourceBinding::sampledTexture(
+            2, QRhiShaderResourceBinding::FragmentStage, m_sceneDepth,
+            m_sceneDepthSampler),
+    });
+    m_postSrb->create();
+
+    PipelineDesc desc;
+    desc.vertShader = ":/shaders/post.vert.qsb";
+    desc.fragShader = ":/shaders/post.frag.qsb";
+    desc.layout = backgroundInputLayout();
+    desc.srb = m_postSrb;
+    desc.depthTest = false;
+    desc.depthWrite = false;
+    desc.cull = QRhiGraphicsPipeline::None;
+    desc.renderPass = m_rt->renderPassDescriptor();
+    desc.sampleCount = qMax(1, m_rt->sampleCount());
+    m_postPipeline = createPipeline(desc);
+}
+
+void RhiRenderer::destroyPostResources() {
+    delete m_postPipeline;
+    delete m_postSrb;
+    m_postPipeline = nullptr;
+    m_postSrb = nullptr;
+}
+
+void RhiRenderer::drawPost(QRhiCommandBuffer* cb) {
+    if (!m_postPipeline || !m_postSrb || !m_postVBuf) {
+        return;
+    }
+    cb->setGraphicsPipeline(m_postPipeline);
+    cb->setShaderResources(m_postSrb);
+    const QRhiCommandBuffer::VertexInput binding(m_postVBuf, 0);
+    cb->setVertexInput(0, 1, &binding);
+    cb->draw(6);
+}
+
+void RhiRenderer::createLabelResources(QRhiCommandBuffer* cb) {
+    QImage atlas(384, 128, QImage::Format_RGBA8888);
+    atlas.fill(Qt::transparent);
+    {
+        QPainter painter(&atlas);
+        painter.setRenderHint(QPainter::Antialiasing, true);
+        QFont font("Arial", 84, QFont::Bold);
+        painter.setFont(font);
+
+        painter.setPen(QColor(230, 70, 70));
+        painter.drawText(QRect(0, 0, 128, 128), Qt::AlignCenter, "X");
+        painter.setPen(QColor(70, 210, 90));
+        painter.drawText(QRect(128, 0, 128, 128), Qt::AlignCenter, "Y");
+        painter.setPen(QColor(80, 140, 240));
+        painter.drawText(QRect(256, 0, 128, 128), Qt::AlignCenter, "Z");
+    }
+
+    m_labelTexture = m_rhi->newTexture(QRhiTexture::RGBA8, atlas.size(), 1);
+    m_labelTexture->create();
+
+    m_labelSampler = m_rhi->newSampler(QRhiSampler::Linear, QRhiSampler::Linear,
+                                       QRhiSampler::Linear, QRhiSampler::ClampToEdge,
+                                       QRhiSampler::ClampToEdge);
+    m_labelSampler->create();
+
+    if (cb) {
+        auto* batch = m_rhi->nextResourceUpdateBatch();
+        batch->uploadTexture(m_labelTexture, atlas);
+        cb->resourceUpdate(batch);
+    }
+}
+
+void RhiRenderer::destroyLabelResources() {
+    delete m_labelSampler;
+    delete m_labelTexture;
+    m_labelSampler = nullptr;
+    m_labelTexture = nullptr;
+}
+
 void RhiRenderer::buildAllPipelines() {
     // ── 背景 ────────────────────────────────────────────────
     m_bgSrb = m_rhi->newShaderResourceBindings();
@@ -319,8 +592,8 @@ void RhiRenderer::buildAllPipelines() {
         QRhiShaderResourceBinding::uniformBufferWithDynamicOffset(
             0, QRhiShaderResourceBinding::VertexStage | QRhiShaderResourceBinding::FragmentStage,
             m_frameUBO, sizeof(FrameUBOData)),
-        QRhiShaderResourceBinding::uniformBuffer(1, QRhiShaderResourceBinding::FragmentStage,
-                                                 m_materialUBO),
+        QRhiShaderResourceBinding::uniformBufferWithDynamicOffset(1, QRhiShaderResourceBinding::FragmentStage, m_materialUBO, sizeof(MaterialUBOData)),
+            QRhiShaderResourceBinding::sampledTexture(3, QRhiShaderResourceBinding::FragmentStage, m_diffuseTexture, m_diffuseSampler),
     });
     m_phongSrb->create();
 
@@ -377,8 +650,8 @@ void RhiRenderer::buildAllPipelines() {
         QRhiShaderResourceBinding::uniformBufferWithDynamicOffset(
             0, QRhiShaderResourceBinding::VertexStage | QRhiShaderResourceBinding::FragmentStage,
             m_frameUBO, sizeof(FrameUBOData)),
-        QRhiShaderResourceBinding::uniformBuffer(1, QRhiShaderResourceBinding::FragmentStage,
-                                                 m_materialUBO),
+        QRhiShaderResourceBinding::uniformBufferWithDynamicOffset(1, QRhiShaderResourceBinding::FragmentStage, m_materialUBO, sizeof(MaterialUBOData)),
+            QRhiShaderResourceBinding::sampledTexture(3, QRhiShaderResourceBinding::FragmentStage, m_diffuseTexture, m_diffuseSampler),
     });
     m_flatSrb->create();
 
@@ -395,8 +668,8 @@ void RhiRenderer::buildAllPipelines() {
         QRhiShaderResourceBinding::uniformBufferWithDynamicOffset(
             0, QRhiShaderResourceBinding::VertexStage | QRhiShaderResourceBinding::FragmentStage,
             m_frameUBO, sizeof(FrameUBOData)),
-        QRhiShaderResourceBinding::uniformBuffer(1, QRhiShaderResourceBinding::FragmentStage,
-                                                 m_materialUBO),
+        QRhiShaderResourceBinding::uniformBufferWithDynamicOffset(1, QRhiShaderResourceBinding::FragmentStage, m_materialUBO, sizeof(MaterialUBOData)),
+            QRhiShaderResourceBinding::sampledTexture(3, QRhiShaderResourceBinding::FragmentStage, m_diffuseTexture, m_diffuseSampler),
     });
     m_pbrSrb->create();
 
@@ -466,6 +739,7 @@ void RhiRenderer::buildAllPipelines() {
         shadowDesc.depthOp = QRhiGraphicsPipeline::LessOrEqual;
         shadowDesc.cull = QRhiGraphicsPipeline::None;
         shadowDesc.renderPass = m_shadowRp;
+        shadowDesc.sampleCount = 1;
         m_shadowPipeline = createPipeline(shadowDesc);
 
         m_shadowedPhongSrb = m_rhi->newShaderResourceBindings();
@@ -473,10 +747,12 @@ void RhiRenderer::buildAllPipelines() {
             QRhiShaderResourceBinding::uniformBufferWithDynamicOffset(
                 0, QRhiShaderResourceBinding::VertexStage | QRhiShaderResourceBinding::FragmentStage,
                 m_frameUBO, sizeof(FrameUBOData)),
-            QRhiShaderResourceBinding::sampledTexture(1, QRhiShaderResourceBinding::FragmentStage,
+            QRhiShaderResourceBinding::uniformBufferWithDynamicOffset(
+                1, QRhiShaderResourceBinding::FragmentStage, m_materialUBO, sizeof(MaterialUBOData)),
+            QRhiShaderResourceBinding::sampledTexture(2, QRhiShaderResourceBinding::FragmentStage,
                                                       m_shadowTexture, m_shadowSampler),
-            QRhiShaderResourceBinding::uniformBuffer(2, QRhiShaderResourceBinding::FragmentStage,
-                                                     m_materialUBO),
+            QRhiShaderResourceBinding::sampledTexture(3, QRhiShaderResourceBinding::FragmentStage,
+                                                      m_diffuseTexture, m_diffuseSampler),
         });
         m_shadowedPhongSrb->create();
 
@@ -532,8 +808,8 @@ void RhiRenderer::buildAllPipelines() {
         QRhiShaderResourceBinding::uniformBufferWithDynamicOffset(
             0, QRhiShaderResourceBinding::VertexStage | QRhiShaderResourceBinding::FragmentStage,
             m_frameUBO, sizeof(FrameUBOData)),
-        QRhiShaderResourceBinding::uniformBuffer(1, QRhiShaderResourceBinding::FragmentStage,
-                                                 m_materialUBO),
+        QRhiShaderResourceBinding::uniformBufferWithDynamicOffset(1, QRhiShaderResourceBinding::FragmentStage, m_materialUBO, sizeof(MaterialUBOData)),
+            QRhiShaderResourceBinding::sampledTexture(3, QRhiShaderResourceBinding::FragmentStage, m_diffuseTexture, m_diffuseSampler),
         QRhiShaderResourceBinding::uniformBuffer(2, QRhiShaderResourceBinding::FragmentStage,
                                                  m_clipUBO),
     });
@@ -546,6 +822,60 @@ void RhiRenderer::buildAllPipelines() {
     clippedDesc.srb = m_clippedSrb;
     clippedDesc.cull = QRhiGraphicsPipeline::None;
     m_clippedPipeline = createPipeline(clippedDesc);
+
+    // ── 剖面封盖 ────────────────────────────────────────────
+    m_capSrb = m_rhi->newShaderResourceBindings();
+    m_capSrb->setBindings({
+        QRhiShaderResourceBinding::uniformBufferWithDynamicOffset(
+            0, QRhiShaderResourceBinding::VertexStage | QRhiShaderResourceBinding::FragmentStage,
+            m_frameUBO, sizeof(FrameUBOData)),
+    });
+    m_capSrb->create();
+
+    QRhiVertexInputLayout capLayout;
+    capLayout.setBindings({{3 * sizeof(float)}});
+    capLayout.setAttributes({{0, 0, QRhiVertexInputAttribute::Float3, 0}});
+
+    PipelineDesc capDesc;
+    capDesc.vertShader = ":/shaders/cap.vert.qsb";
+    capDesc.fragShader = ":/shaders/cap.frag.qsb";
+    capDesc.layout = capLayout;
+    capDesc.srb = m_capSrb;
+    capDesc.cull = QRhiGraphicsPipeline::None;
+    m_capPipeline = createPipeline(capDesc);
+
+    // ── 3D 轴标签 ───────────────────────────────────────────
+    m_labelSrb = m_rhi->newShaderResourceBindings();
+    m_labelSrb->setBindings({
+        QRhiShaderResourceBinding::uniformBufferWithDynamicOffset(
+            0, QRhiShaderResourceBinding::VertexStage | QRhiShaderResourceBinding::FragmentStage,
+            m_frameUBO, sizeof(FrameUBOData)),
+        QRhiShaderResourceBinding::sampledTexture(1, QRhiShaderResourceBinding::FragmentStage,
+                                                  m_labelTexture, m_labelSampler),
+    });
+    m_labelSrb->create();
+
+    QRhiVertexInputLayout labelLayout;
+    labelLayout.setBindings({{sizeof(LabelVertex)}});
+    labelLayout.setAttributes({
+        {0, 0, QRhiVertexInputAttribute::Float3, 0},
+        {0, 1, QRhiVertexInputAttribute::Float2, 12},
+        {0, 2, QRhiVertexInputAttribute::Float2, 20},
+        {0, 3, QRhiVertexInputAttribute::Float3, 28},
+        {0, 4, QRhiVertexInputAttribute::Float, 40},
+    });
+
+    PipelineDesc labelDesc;
+    labelDesc.vertShader = ":/shaders/text3d.vert.qsb";
+    labelDesc.fragShader = ":/shaders/text3d.frag.qsb";
+    labelDesc.layout = labelLayout;
+    labelDesc.srb = m_labelSrb;
+    labelDesc.depthWrite = false;
+    labelDesc.depthOp = QRhiGraphicsPipeline::LessOrEqual;
+    labelDesc.cull = QRhiGraphicsPipeline::None;
+    m_labelPipeline = createPipeline(labelDesc);
+
+    createPostResources();
 }
 
 void RhiRenderer::destroyPipelines() {
@@ -576,6 +906,12 @@ void RhiRenderer::destroyPipelines() {
     delete m_selectionSrb; m_selectionSrb = nullptr;
     delete m_clippedPipeline; m_clippedPipeline = nullptr;
     delete m_clippedSrb; m_clippedSrb = nullptr;
+    delete m_capPipeline; m_capPipeline = nullptr;
+    delete m_capSrb; m_capSrb = nullptr;
+    delete m_labelPipeline; m_labelPipeline = nullptr;
+    delete m_labelSrb; m_labelSrb = nullptr;
+    delete m_postPipeline; m_postPipeline = nullptr;
+    delete m_postSrb; m_postSrb = nullptr;
 }
 
 void RhiRenderer::setRenderMode(int mode) {
@@ -616,11 +952,13 @@ void RhiRenderer::setNormalLength(float length) {
 
 void RhiRenderer::setClipPlane(const QVector4D& plane) {
     m_clipPlane = plane;
+    m_capDirty = true;
 }
 
 void RhiRenderer::resetMeshUploadFlag() {
     m_meshesUploaded = false;
     m_axisDirty = true;
+    m_capDirty = true;
 }
 
 void RhiRenderer::updateSceneBounds(const QVector<RhiMesh*>& meshes) {
@@ -654,6 +992,7 @@ void RhiRenderer::uploadMeshes(QRhiCommandBuffer* cb,
                 continue;
             }
             mesh->setRhi(m_rhi);
+            mesh->setBufferPool(&m_bufferPool);
             mesh->upload(batch);
         }
         cb->resourceUpdate(batch);
@@ -683,7 +1022,7 @@ void RhiRenderer::uploadAxisGrid(QRhiResourceUpdateBatch* batch) {
         grid.append({{extent, y, z}, gridColor});
     }
 
-    const float axisLength = qMax(m_sceneRadius * 1.5f, 1.0f);
+    const float axisLength = qMax(m_sceneRadius * 1.05f, 1.0f);
     axis.append({{0, 0, 0}, {0.9f, 0.25f, 0.25f}});
     axis.append({{axisLength, 0, 0}, {0.9f, 0.25f, 0.25f}});
     axis.append({{0, 0, 0}, {0.3f, 0.85f, 0.35f}});
@@ -705,6 +1044,36 @@ void RhiRenderer::uploadAxisGrid(QRhiResourceUpdateBatch* batch) {
                                   quint32(axis.size() * sizeof(AxisVertex)));
     m_axisVBuf->create();
     batch->uploadStaticBuffer(m_axisVBuf, axis.constData());
+
+    // 轴末端的 X/Y/Z 文字标签（公告板四边形）
+    QVector<LabelVertex> labels;
+    const float labelScale = qMax(m_sceneRadius * 0.12f, 0.15f);
+
+    auto addLabel = [&labels, labelScale](const QVector3D& center, int cell,
+                                          const QVector3D& color) {
+        const float u0 = float(cell) / 3.0f;
+        const float u1 = float(cell + 1) / 3.0f;
+        const QVector2D corners[4] = {
+            {-0.5f, -0.5f}, {0.5f, -0.5f}, {0.5f, 0.5f}, {-0.5f, 0.5f}};
+        const QVector2D uvs[4] = {
+            {u0, 1}, {u1, 1}, {u1, 0}, {u0, 0}};
+        const int order[6] = {0, 1, 2, 0, 2, 3};
+        for (int i : order) {
+            labels.append({center, corners[i], uvs[i], color, labelScale});
+        }
+    };
+
+    addLabel({axisLength, 0, 0}, 0, {0.9f, 0.3f, 0.3f});
+    addLabel({0, axisLength, 0}, 1, {0.3f, 0.85f, 0.35f});
+    addLabel({0, 0, axisLength}, 2, {0.35f, 0.55f, 0.95f});
+
+    delete m_labelVBuf;
+    m_labelVBuf = m_rhi->newBuffer(
+        QRhiBuffer::Immutable, QRhiBuffer::VertexBuffer,
+        quint32(labels.size() * sizeof(LabelVertex)));
+    m_labelVBuf->create();
+    batch->uploadStaticBuffer(m_labelVBuf, labels.constData());
+    m_labelVertexCount = labels.size();
 
     m_axisVertexCount = axis.size();
     m_axisDirty = false;
@@ -731,23 +1100,229 @@ void RhiRenderer::drawAxisGrid(QRhiCommandBuffer* cb, int slot) {
     }
 }
 
+void RhiRenderer::rebuildCapGeometry(const QVector<RhiMesh*>& meshes) {
+    m_capVerts.clear();
+
+    QVector3D normal(m_clipPlane.x(), m_clipPlane.y(), m_clipPlane.z());
+    const float length = normal.length();
+    if (length < 1e-8f) {
+        m_capVertexCount = 0;
+        return;
+    }
+    normal /= length;
+    const float planeD = m_clipPlane.w() / length;
+
+    QVector3D u = QVector3D::crossProduct(
+        normal, qAbs(normal.y()) > 0.9f ? QVector3D(1, 0, 0) : QVector3D(0, 1, 0));
+    if (u.lengthSquared() < 1e-8f) {
+        u = QVector3D::crossProduct(normal, QVector3D(0, 0, 1));
+    }
+    u.normalize();
+    const QVector3D v = QVector3D::crossProduct(normal, u).normalized();
+
+    for (const RhiMesh* mesh : meshes) {
+        if (!mesh || !mesh->isVisible()) {
+            continue;
+        }
+        const CpuMesh& cpu = mesh->cpuMesh();
+        QVector<QVector3D> points;
+
+        auto addEdge = [&points, &normal, planeD](const QVector3D& a,
+                                                  const QVector3D& b,
+                                                  float da, float db) {
+            if ((da > 0.0f) == (db > 0.0f)) {
+                return;
+            }
+            const float denom = da - db;
+            if (qAbs(denom) < 1e-8f) {
+                return;
+            }
+            const float t = da / denom;
+            points.append(a + (b - a) * t);
+        };
+
+        for (int i = 0; i + 2 < cpu.indices.size(); i += 3) {
+            const QVector3D& a = cpu.vertices[cpu.indices[i]].position;
+            const QVector3D& b = cpu.vertices[cpu.indices[i + 1]].position;
+            const QVector3D& c = cpu.vertices[cpu.indices[i + 2]].position;
+            const float da = QVector3D::dotProduct(normal, a) + planeD;
+            const float db = QVector3D::dotProduct(normal, b) + planeD;
+            const float dc = QVector3D::dotProduct(normal, c) + planeD;
+
+            addEdge(a, b, da, db);
+            addEdge(b, c, db, dc);
+            addEdge(c, a, dc, da);
+        }
+
+        if (points.size() < 3) {
+            continue;
+        }
+
+        QVector3D centroid;
+        for (const QVector3D& p : points) {
+            centroid += p;
+        }
+        centroid /= float(points.size());
+
+        std::sort(points.begin(), points.end(),
+                  [&centroid, &u, &v](const QVector3D& a, const QVector3D& b) {
+                      const QVector3D da = a - centroid;
+                      const QVector3D db = b - centroid;
+                      return qAtan2(QVector3D::dotProduct(da, v),
+                                    QVector3D::dotProduct(da, u)) <
+                             qAtan2(QVector3D::dotProduct(db, v),
+                                    QVector3D::dotProduct(db, u));
+                  });
+
+        for (int i = 0; i < points.size(); ++i) {
+            m_capVerts.append(centroid);
+            m_capVerts.append(points[i]);
+            m_capVerts.append(points[(i + 1) % points.size()]);
+        }
+    }
+
+    m_capVertexCount = m_capVerts.size();
+}
+
+void RhiRenderer::uploadCapGeometry(QRhiResourceUpdateBatch* batch) {
+    delete m_capVBuf;
+    m_capVBuf = nullptr;
+
+    if (m_capVertexCount > 0) {
+        m_capVBuf = m_rhi->newBuffer(
+            QRhiBuffer::Immutable, QRhiBuffer::VertexBuffer,
+            quint32(m_capVertexCount * sizeof(QVector3D)));
+        m_capVBuf->create();
+        batch->uploadStaticBuffer(m_capVBuf, m_capVerts.constData());
+    }
+    m_capDirty = false;
+}
+
+void RhiRenderer::drawCap(QRhiCommandBuffer* cb, int slot) {
+    if (!m_capPipeline || !m_capVBuf || m_capVertexCount <= 0) {
+        return;
+    }
+    cb->setGraphicsPipeline(m_capPipeline);
+    const auto offset = frameOffset(slot);
+    cb->setShaderResources(m_capSrb, 1, &offset);
+    const QRhiCommandBuffer::VertexInput binding(m_capVBuf, 0);
+    cb->setVertexInput(0, 1, &binding);
+    cb->draw(m_capVertexCount);
+}
+
+void RhiRenderer::drawAxisLabels(QRhiCommandBuffer* cb, int slot) {
+    if (!m_axisVisible || !m_labelPipeline || !m_labelVBuf ||
+        m_labelVertexCount <= 0) {
+        return;
+    }
+    cb->setGraphicsPipeline(m_labelPipeline);
+    const auto offset = frameOffset(slot);
+    cb->setShaderResources(m_labelSrb, 1, &offset);
+    const QRhiCommandBuffer::VertexInput binding(m_labelVBuf, 0);
+    cb->setVertexInput(0, 1, &binding);
+    cb->draw(m_labelVertexCount);
+}
+
+void RhiRenderer::beginSlot(int slot) {
+    m_currentSlot = qBound(0, slot, 3);
+    m_frustum = Frustum::fromMatrix(m_slotViewProj[m_currentSlot]);
+    m_frustumValid = m_cullEnabled;
+}
+
+bool RhiRenderer::isMeshCulled(const RhiMesh* mesh) const {
+    if (!mesh || !mesh->isVisible()) {
+        return true;
+    }
+    if (!m_frustumValid) {
+        return false;
+    }
+    return !m_frustum.intersectsSphere(mesh->boundingCenter(),
+                                       mesh->boundingRadius());
+}
+
+int RhiRenderer::lodLevelFor(const RhiMesh* mesh) const {
+    if (!m_lodEnabled || !mesh) {
+        return 0;
+    }
+
+    // 投影半径（相对屏幕高度）：radius / (dist * tan(fov/2))
+    const float dist = qMax(
+        (mesh->boundingCenter() - m_slotEye[m_currentSlot]).length(), 1e-4f);
+    const float scale = qMax(m_slotProjScale[m_currentSlot], 1e-4f);
+    const float projected = mesh->boundingRadius() / dist / scale;
+
+    if (projected < 0.05f && mesh->lodIndexCount(2) > 0) {
+        return 2;
+    }
+    if (projected < 0.14f && mesh->lodIndexCount(1) > 0) {
+        return 1;
+    }
+    return 0;
+}
+
 void RhiRenderer::drawMeshesIndexed(QRhiCommandBuffer* cb,
                                     const QVector<RhiMesh*>& meshes,
-                                    QRhiShaderResourceBindings* srb, int slot) {
+                                    QRhiShaderResourceBindings* srb, int slot,
+                                    bool useMaterial) {
     if (!srb) {
         return;
     }
-    const auto offset = frameOffset(slot);
-    cb->setShaderResources(srb, 1, &offset);
 
-    for (RhiMesh* mesh : meshes) {
-        if (!mesh || !mesh->isVisible() || !mesh->vertexBuffer() || !mesh->indexBuffer()) {
+    beginSlot(slot);
+
+    if (!useMaterial) {
+        const auto offset = frameOffset(slot);
+        cb->setShaderResources(srb, 1, &offset);
+    }
+
+    int lastMaterialSlot = -1;
+
+    for (int i = 0; i < meshes.size(); ++i) {
+        RhiMesh* mesh = meshes[i];
+        if (isMeshCulled(mesh) || !mesh->vertexBuffer() ||
+            !mesh->indexBuffer()) {
+            ++m_stats.culled;
             continue;
         }
+
+        if (useMaterial) {
+            const int materialSlot = m_meshMaterialSlot.value(i, i);
+            if (materialSlot != lastMaterialSlot) {
+                const QRhiCommandBuffer::DynamicOffset offsets[2] = {
+                    frameOffset(slot), materialOffset(materialSlot)};
+                cb->setShaderResources(srb, 2, offsets);
+                lastMaterialSlot = materialSlot;
+                ++m_stats.materialBatches;
+            }
+        }
+
+        const int lod = lodLevelFor(mesh);
+        QRhiBuffer* indexBuffer = mesh->indexBuffer();
+        int indexCount = mesh->indexCount();
+        if (lod > 0 && mesh->lodIndexBuffer(lod)) {
+            indexBuffer = mesh->lodIndexBuffer(lod);
+            indexCount = mesh->lodIndexCount(lod);
+        }
+
+        if (indexCount <= 0) {
+            continue;
+        }
+
         const QRhiCommandBuffer::VertexInput binding(mesh->vertexBuffer(), 0);
-        cb->setVertexInput(0, 1, &binding, mesh->indexBuffer(), 0,
+        cb->setVertexInput(0, 1, &binding, indexBuffer, 0,
                            QRhiCommandBuffer::IndexUInt32);
-        cb->drawIndexed(mesh->indexCount());
+        cb->drawIndexed(indexCount);
+
+        ++m_stats.drawn;
+        ++m_stats.drawCalls;
+        m_stats.triangles += indexCount / 3;
+        if (lod == 0) {
+            ++m_stats.lod0;
+        } else if (lod == 1) {
+            ++m_stats.lod1;
+        } else {
+            ++m_stats.lod2;
+        }
     }
 }
 
@@ -757,17 +1332,22 @@ void RhiRenderer::drawWireframe(QRhiCommandBuffer* cb,
     if (!srb) {
         return;
     }
+    beginSlot(slot);
     const auto offset = frameOffset(slot);
     cb->setShaderResources(srb, 1, &offset);
 
     for (RhiMesh* mesh : meshes) {
-        if (!mesh || !mesh->isVisible() || !mesh->vertexBuffer() || !mesh->lineIndexBuffer()) {
+        if (isMeshCulled(mesh) || !mesh->vertexBuffer() ||
+            !mesh->lineIndexBuffer()) {
+            ++m_stats.culled;
             continue;
         }
         const QRhiCommandBuffer::VertexInput binding(mesh->vertexBuffer(), 0);
         cb->setVertexInput(0, 1, &binding, mesh->lineIndexBuffer(), 0,
                            QRhiCommandBuffer::IndexUInt32);
         cb->drawIndexed(mesh->lineIndexCount());
+        ++m_stats.drawn;
+        ++m_stats.drawCalls;
     }
 }
 
@@ -778,11 +1358,12 @@ void RhiRenderer::drawNormalLines(QRhiCommandBuffer* cb,
     if (!srb) {
         return;
     }
+    beginSlot(slot);
     const auto offset = frameOffset(slot);
     cb->setShaderResources(srb, 1, &offset);
 
     for (RhiMesh* mesh : meshes) {
-        if (!mesh || !mesh->isVisible()) {
+        if (isMeshCulled(mesh)) {
             continue;
         }
         QRhiBuffer* buffer = faceNormals ? mesh->faceNormalBuffer()
@@ -795,6 +1376,7 @@ void RhiRenderer::drawNormalLines(QRhiCommandBuffer* cb,
         const QRhiCommandBuffer::VertexInput binding(buffer, 0);
         cb->setVertexInput(0, 1, &binding);
         cb->draw(count);
+        ++m_stats.drawCalls;
     }
 }
 
@@ -829,7 +1411,7 @@ void RhiRenderer::drawSurface(QRhiCommandBuffer* cb,
         return;
     }
     cb->setGraphicsPipeline(pipeline);
-    drawMeshesIndexed(cb, meshes, srb, slot);
+    drawMeshesIndexed(cb, meshes, srb, slot, true);
 }
 
 void RhiRenderer::drawWireOverlay(QRhiCommandBuffer* cb,
@@ -916,6 +1498,7 @@ void RhiRenderer::drawMultiView(QRhiCommandBuffer* cb,
         const float y = (i / 2) * halfHeight;
         cb->setViewport({x, y, halfWidth, halfHeight});
         cb->setScissor({int(x), int(y), int(halfWidth), int(halfHeight)});
+        beginSlot(i);
 
         if (m_displayStyle == DisplayStyle::Wireframe) {
             if (m_wireframePipeline) {
@@ -929,6 +1512,7 @@ void RhiRenderer::drawMultiView(QRhiCommandBuffer* cb,
             }
         }
         drawAxisGrid(cb, i);
+        drawAxisLabels(cb, i);
     }
 
     cb->setViewport({0, 0, width, height});
@@ -946,9 +1530,34 @@ void RhiRenderer::render(QRhiCommandBuffer* cb,
 
     uploadMeshes(cb, meshes);
 
+    m_bufferPool.beginFrame();
+    m_stats = RenderStats();
+    m_stats.objects = meshes.size();
+    m_stats.pooledBuffers = m_bufferPool.cachedCount();
+
+    (void)mat;   // 材质已按对象存储
+
+    if (m_diffuseDirty && m_initialized) {
+        destroyPipelines();
+        createDiffuseTexture();
+        buildAllPipelines();
+        m_diffuseDirty = false;
+    }
+
     const QSize size = m_rt->pixelSize();
     const float width = qMax(1.0f, float(size.width()));
     const float height = qMax(1.0f, float(size.height()));
+
+    // 后处理开启时，尺寸变化需要同步重建离屏目标与场景管线
+    if (isPostEnabled() && (!m_sceneRt || m_sceneSize != size)) {
+        destroyPipelines();
+        ensureSceneTarget(size);
+        m_pipelineRp = m_sceneRp;
+        buildAllPipelines();
+    }
+
+    const bool usePost = isPostEnabled() && m_sceneRt && m_postPipeline;
+    QRhiRenderTarget* sceneTarget = usePost ? m_sceneRt : m_rt;
 
     const bool splitScreen = (m_renderMode == RenderMode::SplitScreen);
     const float aspect = splitScreen ? (width * 0.5f) / height : width / height;
@@ -972,6 +1581,18 @@ void RhiRenderer::render(QRhiCommandBuffer* cb,
             viewCameras[i].setPosition(cam.position());
             viewCameras[i].setUp(cam.upDirection());
         }
+    }
+
+    // 记录各视口的相机状态，供视锥剔除与距离 LOD 使用
+    for (int i = 0; i < 4; ++i) {
+        const Camera& camera = viewCameras[i < slotCount ? i : 0];
+        const QMatrix4x4 view = camera.viewMatrix();
+        const QMatrix4x4 proj = m_rhi->clipSpaceCorrMatrix() *
+                                camera.projectionMatrix(aspect);
+        m_slotViewProj[i] = proj * view;
+        m_slotEye[i] = camera.position();
+        const float p11 = proj(1, 1);
+        m_slotProjScale[i] = (qAbs(p11) > 1e-6f) ? 1.0f / qAbs(p11) : 0.4f;
     }
 
     // ── 阴影矩阵 ────────────────────────────────────────────
@@ -1015,14 +1636,6 @@ void RhiRenderer::render(QRhiCommandBuffer* cb,
     }
 
     // ── 材质/背景/法线/裁剪/选择 UBO ────────────────────────
-    MaterialUBOData materialData{};
-    materialData.shininess = mat.shininess;
-    materialData.metallic = mat.metallic;
-    materialData.roughness = mat.roughness;
-    std::memcpy(materialData.ambient, &mat.ambient, sizeof(float) * 3);
-    std::memcpy(materialData.diffuse, &mat.diffuse, sizeof(float) * 3);
-    std::memcpy(materialData.specular, &mat.specular, sizeof(float) * 3);
-
     BackgroundUBOData bgData{};
     bgData.topColor[0] = m_bgTopColor.x();
     bgData.topColor[1] = m_bgTopColor.y();
@@ -1066,7 +1679,71 @@ void RhiRenderer::render(QRhiCommandBuffer* cb,
         updates->updateDynamicBuffer(m_frameUBO, quint32(i * m_frameStride),
                                      sizeof(FrameUBOData), &frame);
     }
-    updates->updateDynamicBuffer(m_materialUBO, 0, sizeof(materialData), &materialData);
+
+    // 逐对象材质：相同材质复用同一槽位，绘制时可合并状态切换（批处理）
+    m_meshMaterialSlot.resize(meshes.size());
+    m_meshMaterialSlot.fill(-1);
+
+    QHash<quint64, int> materialSlotMap;
+    QVector<MaterialUBOData> materialSlots;
+    for (int i = 0; i < meshes.size(); ++i) {
+        if (!meshes[i]) {
+            continue;
+        }
+        const Material& meshMaterial = meshes[i]->material();
+        const float values[12] = {
+            meshMaterial.ambient.x(), meshMaterial.ambient.y(),
+            meshMaterial.ambient.z(), meshMaterial.diffuse.x(),
+            meshMaterial.diffuse.y(), meshMaterial.diffuse.z(),
+            meshMaterial.specular.x(), meshMaterial.specular.y(),
+            meshMaterial.specular.z(), meshMaterial.shininess,
+            meshMaterial.metallic, meshMaterial.roughness};
+        const quint64 hash =
+            qHash(QByteArray(reinterpret_cast<const char*>(values),
+                             sizeof(values)));
+
+        auto it = materialSlotMap.find(hash);
+        if (it != materialSlotMap.end()) {
+            m_meshMaterialSlot[i] = it.value();
+            continue;
+        }
+
+        if (materialSlots.size() >= m_materialSlots) {
+            m_meshMaterialSlot[i] = m_materialSlots - 1;
+            continue;
+        }
+
+        MaterialUBOData data{};
+        data.shininess = meshMaterial.shininess;
+        data.metallic = meshMaterial.metallic;
+        data.roughness = meshMaterial.roughness;
+        std::memcpy(data.ambient, &meshMaterial.ambient, sizeof(float) * 3);
+        std::memcpy(data.diffuse, &meshMaterial.diffuse, sizeof(float) * 3);
+        std::memcpy(data.specular, &meshMaterial.specular, sizeof(float) * 3);
+
+        const int slot = materialSlots.size();
+        materialSlots.append(data);
+        materialSlotMap.insert(hash, slot);
+        m_meshMaterialSlot[i] = slot;
+    }
+
+    for (int i = 0; i < materialSlots.size(); ++i) {
+        updates->updateDynamicBuffer(m_materialUBO, quint32(i * m_materialStride),
+                                     sizeof(MaterialUBOData), &materialSlots[i]);
+    }
+
+    if (m_diffuseUploadPending && m_diffuseTexture) {
+        QImage image = m_diffuseImage;
+        if (image.isNull()) {
+            image = QImage(1, 1, QImage::Format_RGBA8888);
+            image.fill(Qt::white);
+        } else {
+            image = image.convertToFormat(QImage::Format_RGBA8888);
+        }
+        updates->uploadTexture(m_diffuseTexture, image);
+        m_diffuseUploadPending = false;
+    }
+
     updates->updateDynamicBuffer(m_bgUBO, 0, sizeof(bgData), &bgData);
     updates->updateDynamicBuffer(m_normalUBO, 0, sizeof(normalData), &normalData);
     updates->updateDynamicBuffer(m_clipUBO, 0, sizeof(clipData), &clipData);
@@ -1087,13 +1764,48 @@ void RhiRenderer::render(QRhiCommandBuffer* cb,
         uploadAxisGrid(updates);
     }
 
-    cb->beginPass(m_rt, QColor(30, 30, 30), QRhiDepthStencilClearValue(1.0f, 0), updates);
+    if (m_renderMode == RenderMode::ClippingPlane && m_capDirty) {
+        rebuildCapGeometry(meshes);
+        uploadCapGeometry(updates);
+    }
+
+    auto finishPost = [&]() {
+        if (!usePost) {
+            return;
+        }
+
+        PostUBOData postData{};
+        postData.texelX = 1.0f / width;
+        postData.texelY = 1.0f / height;
+        postData.flipY = m_rhi->isYUpInNDC() ? 1.0f : 0.0f;
+        postData.aoStrength = m_aoStrength;
+        postData.nearPlane = 0.01f;
+        postData.farPlane = 1000.0f;
+        postData.aoRadius = 2.5f;
+        postData.fxaaEnabled = m_fxaaEnabled ? 1.0f : 0.0f;
+        postData.aoEnabled = m_aoEnabled ? 1.0f : 0.0f;
+        postData.exposure = 1.0f;
+
+        auto* postBatch = m_rhi->nextResourceUpdateBatch();
+        postBatch->updateDynamicBuffer(m_postUBO, 0, sizeof(postData), &postData);
+
+        cb->beginPass(m_rt, QColor(0, 0, 0), QRhiDepthStencilClearValue(1.0f, 0),
+                      postBatch);
+        cb->setViewport({0, 0, width, height});
+        cb->setScissor({0, 0, int(width), int(height)});
+        drawPost(cb);
+        cb->endPass();
+    };
+
+    cb->beginPass(sceneTarget, QColor(30, 30, 30),
+                  QRhiDepthStencilClearValue(1.0f, 0), updates);
     cb->setViewport({0, 0, width, height});
 
     if (m_multiView) {
         drawBackground(cb);
         drawMultiView(cb, meshes, width, height);
         cb->endPass();
+        finishPost();
         return;
     }
 
@@ -1102,6 +1814,8 @@ void RhiRenderer::render(QRhiCommandBuffer* cb,
     } else {
         drawBackground(cb);
     }
+
+    beginSlot(0);
 
     switch (m_renderMode) {
         case RenderMode::Phong:
@@ -1148,21 +1862,21 @@ void RhiRenderer::render(QRhiCommandBuffer* cb,
         case RenderMode::FlatShading:
             if (m_flatPipeline) {
                 cb->setGraphicsPipeline(m_flatPipeline);
-                drawMeshesIndexed(cb, meshes, m_flatSrb, 0);
+                drawMeshesIndexed(cb, meshes, m_flatSrb, 0, true);
             }
             break;
 
         case RenderMode::PBR:
             if (m_pbrPipeline) {
                 cb->setGraphicsPipeline(m_pbrPipeline);
-                drawMeshesIndexed(cb, meshes, m_pbrSrb, 0);
+                drawMeshesIndexed(cb, meshes, m_pbrSrb, 0, true);
             }
             break;
 
         case RenderMode::ShadowMapping:
             if (m_shadowedPhongPipeline) {
                 cb->setGraphicsPipeline(m_shadowedPhongPipeline);
-                drawMeshesIndexed(cb, meshes, m_shadowedPhongSrb, 0);
+                drawMeshesIndexed(cb, meshes, m_shadowedPhongSrb, 0, true);
             } else {
                 drawSurface(cb, meshes, 0);
             }
@@ -1196,8 +1910,9 @@ void RhiRenderer::render(QRhiCommandBuffer* cb,
         case RenderMode::ClippingPlane:
             if (m_clippedPipeline) {
                 cb->setGraphicsPipeline(m_clippedPipeline);
-                drawMeshesIndexed(cb, meshes, m_clippedSrb, 0);
+                drawMeshesIndexed(cb, meshes, m_clippedSrb, 0, true);
             }
+            drawCap(cb, 0);
             break;
 
         case RenderMode::SplitScreen: {
@@ -1219,6 +1934,8 @@ void RhiRenderer::render(QRhiCommandBuffer* cb,
     }
 
     drawAxisGrid(cb, 0);
+    drawAxisLabels(cb, 0);
 
     cb->endPass();
+    finishPost();
 }

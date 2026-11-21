@@ -19,6 +19,8 @@
 #include <QVector2D>
 #include <QString>
 #include <QVector>
+#include <QImage>
+#include <QMatrix4x4>
 #include "../math/BoundingBox.h"
 
 /// @brief CPU 端网格数据结构，用于存储 3D 模型的几何数据
@@ -78,6 +80,22 @@ struct CpuMesh {
 
   /// @brief 基础颜色（来自材质 diffuse，用于加载后初始化材质）
   QVector3D baseColor{0.8f, 0.8f, 0.8f};
+
+  /// @brief 漫反射贴图（来自模型材质，可为空）
+  QImage diffuseTexture;
+
+  // ── 动画节点链（用于按节点动画重新计算世界变换）─────────────
+  /// @brief 网格所属节点名称
+  QString nodeName;
+
+  /// @brief 从根节点到网格所属节点的节点名链
+  QVector<QString> nodePath;
+
+  /// @brief 与 nodePath 平行的静止局部变换（rest pose）
+  QVector<QMatrix4x4> nodeRestLocals;
+
+  /// @brief 加载时烘焙到顶点上的静止世界变换
+  QMatrix4x4 restWorld;
 };
 
 #endif  // MODELVIEWER_SRC_CORE_CPUMESH_H_

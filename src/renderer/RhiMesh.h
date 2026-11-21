@@ -18,7 +18,11 @@
 #include <rhi/qrhi.h>
 #include <QMatrix4x4>
 #include <QString>
+#include <QVector>
 #include "../core/CpuMesh.h"
+#include "../core/Material.h"
+
+class BufferPool;
 
 /// @brief GPU 端网格数据管理类
 ///
@@ -51,6 +55,9 @@ class RhiMesh {
   /// @brief 设置 RHI 设备指针
   void setRhi(QRhi* rhi) { m_rhi = rhi; }
 
+  /// @brief 设置 GPU 缓冲对象池（可为空，空则自行创建/销毁）
+  void setBufferPool(BufferPool* pool) { m_pool = pool; }
+
   /// @brief 将 CPU 数据上传到 GPU
   ///
   /// @param[in] batch 资源更新批次，用于批量提交更新操作
@@ -68,6 +75,24 @@ class RhiMesh {
   QRhiBuffer* lineIndexBuffer() const { return m_lineIbuf; }
   int lineIndexCount() const { return m_lineIndexCount; }
 
+  /// @brief 距离 LOD 索引缓冲（0 = 原始，1/2 = 粗略级别）
+  ///
+  /// 采用顶点聚类简化：把顶点量化到不同分辨率的网格，同一网格单元
+  /// 只保留一个代表顶点，从而在不新增顶点缓冲的前提下降低三角形数量。
+  static constexpr int kLodLevelCount = 2;
+  QRhiBuffer* lodIndexBuffer(int level) const {
+    return (level >= 1 && level <= kLodLevelCount) ? m_lodIbuf[level - 1]
+                                                   : nullptr;
+  }
+  int lodIndexCount(int level) const {
+    return (level >= 1 && level <= kLodLevelCount) ? m_lodIndexCount[level - 1]
+                                                   : 0;
+  }
+
+  /// @brief 当前网格的包围球
+  QVector3D boundingCenter() const { return m_center; }
+  float boundingRadius() const { return m_radius; }
+
   /// @brief 顶点法线线段（Lines 拓扑，非索引绘制）
   QRhiBuffer* vertexNormalBuffer() const { return m_vnormalVbuf; }
   int vertexNormalVertexCount() const { return m_vertexNormalLines.size(); }
@@ -78,6 +103,9 @@ class RhiMesh {
 
   /// @brief 访问 CPU 端数据（用于拾取、统计等）
   const CpuMesh& cpuMesh() const { return m_cpuData; }
+
+  /// @brief 未经变换的原始 CPU 数据（用于复制对象/重新变换）
+  const CpuMesh& baseMesh() const { return m_baseData; }
 
   // ── 对象属性 ─────────────────────────────────────────────
   void setName(const QString& name) { m_name = name; }
@@ -94,30 +122,65 @@ class RhiMesh {
   QMatrix4x4 transform() const { return m_transform; }
   void resetTransform() { setTransform(QMatrix4x4()); }
 
+  /// @brief 设置动画产生的附加变换（在用户变换之前应用）
+  void setAnimationDelta(const QMatrix4x4& delta);
+  QMatrix4x4 animationDelta() const { return m_animDelta; }
+
+  /// @brief 复制该对象（共享原始几何，独立的 GPU 资源与变换）
+  RhiMesh* clone() const;
+
+  void setMaterial(const Material& material) { m_material = material; }
+  const Material& material() const { return m_material; }
+
  private:
   void buildLineIndices();
   void buildNormalLines();
+  void buildLodIndices(int level, int cells);
   void rebuildDerivedData();
+  void rebuildCpuData();
+
+  QRhiBuffer* createBuffer(QRhiResourceUpdateBatch* batch,
+                           QRhiBuffer::UsageFlag usage, const void* data,
+                           quint32 size, quint32* capacity);
+  void destroyBuffer(QRhiBuffer** buffer, QRhiBuffer::UsageFlag usage,
+                     quint32 capacity);
 
   QRhi* m_rhi = nullptr;
+  BufferPool* m_pool = nullptr;
   QRhiBuffer* m_vbuf = nullptr;
   QRhiBuffer* m_ibuf = nullptr;
   QRhiBuffer* m_lineIbuf = nullptr;
   QRhiBuffer* m_vnormalVbuf = nullptr;
   QRhiBuffer* m_fnormalVbuf = nullptr;
+  QRhiBuffer* m_lodIbuf[kLodLevelCount] = {nullptr, nullptr};
+
+  quint32 m_vbufCapacity = 0;
+  quint32 m_ibufCapacity = 0;
+  quint32 m_lineIbufCapacity = 0;
+  quint32 m_vnormalCapacity = 0;
+  quint32 m_fnormalCapacity = 0;
+  quint32 m_lodIbufCapacity[kLodLevelCount] = {0, 0};
 
   CpuMesh m_baseData;   ///< 未变换的原始数据
   CpuMesh m_cpuData;    ///< 当前（已变换）数据
   QVector<quint32> m_lineIndices;
+  QVector<quint32> m_lodIndices[kLodLevelCount];
   QVector<LineVertex> m_vertexNormalLines;
   QVector<LineVertex> m_faceNormalLines;
 
   QString m_name;
   bool m_visible = true;
-  QMatrix4x4 m_transform;
+  QMatrix4x4 m_userTransform;   ///< 用户对象变换
+  QMatrix4x4 m_animDelta;       ///< 动画附加变换
+  QMatrix4x4 m_transform;       ///< 实际烘焙到顶点的组合变换
+  Material m_material;
+
+  QVector3D m_center;
+  float m_radius = 0.0f;
 
   int m_indexCount = 0;
   int m_lineIndexCount = 0;
+  int m_lodIndexCount[kLodLevelCount] = {0, 0};
   bool m_uploaded = false;
 };
 

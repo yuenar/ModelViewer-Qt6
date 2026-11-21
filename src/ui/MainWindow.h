@@ -21,6 +21,7 @@
 #include <QVector>
 #include <QVector3D>
 #include "../core/CpuMesh.h"
+#include "../core/Animation.h"
 
 class QAction;
 class QActionGroup;
@@ -32,6 +33,9 @@ class QListWidgetItem;
 class QMenu;
 class QTabWidget;
 class QUndoStack;
+class QTimer;
+class QJsonObject;
+class ScriptConsole;
 class RhiWidget;
 
 /// @brief 应用程序主窗口
@@ -67,6 +71,30 @@ class MainWindow : public QMainWindow {
   bool exportModelTo(const QString& path);
   void setMeshTransformValues(int index, const QVector3D& translate,
                               const QVector3D& rotate, const QVector3D& scale);
+  void setMeshColor(int index, const QVector3D& color);
+
+  /// @brief 抗锯齿 / 后处理
+  void setMsaa(int samples);
+  void setFxaaEnabled(bool enabled);
+  void setAoEnabled(bool enabled);
+  QString renderStatsText() const;
+
+  /// @brief 动画控制
+  bool hasAnimation() const;
+  int animationCount() const;
+  void playAnimation(int index = -1);
+  void pauseAnimation();
+  void stopAnimation();
+  void setAnimationTime(float seconds);
+  QString animationName(int index) const;
+
+  /// @brief 场景协作（JSON 导入/导出与本地同步）
+  bool exportSceneState(const QString& path);
+  bool importSceneState(const QString& path);
+
+  /// @brief 脚本/插件
+  bool runScriptFile(const QString& path);
+  void loadPlugins();
 
   /// @brief 应用对象变换参数（供撤销/重做命令调用）
   void applyMeshParams(int index, const MeshParams& params);
@@ -103,6 +131,9 @@ class MainWindow : public QMainWindow {
   void onShowAllObjects();
   void onHideAllObjects();
   void onSwapVisibility();
+  void onDuplicateObject();
+  void onRenameObject();
+  void onDeleteObject();
 
  private:
   struct Document {
@@ -134,6 +165,12 @@ class MainWindow : public QMainWindow {
   void loadRecentFile(const QString& path);
   bool exportMeshesTo(const QString& path, QString* errorMessage);
 
+  QJsonObject captureSceneState() const;
+  bool applySceneState(const QJsonObject& root, QString* errorMessage);
+  void onToggleLocalSync(bool enabled);
+  void onSyncTick();
+  void onScriptConsole();
+
   RhiWidget* m_rhiWidget = nullptr;
   QTabWidget* m_tabs = nullptr;
   QVector<Document> m_documents;
@@ -147,6 +184,8 @@ class MainWindow : public QMainWindow {
   QAction* m_actionMultiView = nullptr;
   QAction* m_actionAxis = nullptr;
   QAction* m_actionGrid = nullptr;
+  QAction* m_actionFxaa = nullptr;
+  QAction* m_actionAo = nullptr;
   QAction* m_openAction = nullptr;
   QMenu* m_recentMenu = nullptr;
 
@@ -166,7 +205,12 @@ class MainWindow : public QMainWindow {
   QString m_currentFilePath;
   QString m_pendingPath;
   QStringList m_recentFiles;
-  QFutureWatcher<QVector<CpuMesh>> m_loadWatcher;
+  QFutureWatcher<ModelAsset> m_loadWatcher;
+
+  QTimer* m_syncTimer = nullptr;
+  QString m_syncPath;
+  QByteArray m_lastSyncHash;
+  ScriptConsole* m_scriptConsole = nullptr;
 };
 
 #endif  // MODELVIEWER_SRC_UI_MAINWINDOW_H_

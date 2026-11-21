@@ -1,7 +1,10 @@
 #version 460
 
 layout(location = 0) in  vec3 fragPos;
+layout(location = 1) in  vec2 vTexCoord;
 layout(location = 0) out vec4 outColor;
+
+layout(binding = 3) uniform sampler2D diffuseMap;
 
 layout(std140, binding = 0) uniform FrameUBO {
     mat4 model; mat4 view; mat4 projection; mat4 normalMatrix;
@@ -27,5 +30,5 @@ void main() {
     float diff = max(dot(N, L), 0.0);
 
     vec3 color = ambient * lightColor + diffuse * lightColor * diff;
-    outColor = vec4(color, 1.0);
+    outColor = vec4(color * texture(diffuseMap, vTexCoord).rgb, 1.0);
 }

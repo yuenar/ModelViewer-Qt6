@@ -18,6 +18,7 @@
 #include <QString>
 #include <QVector>
 #include "../core/CpuMesh.h"
+#include "../core/Animation.h"
 
 /// @brief 3D 模型加载器，负责将各种格式的 3D 模型文件加载为内部数据结构
 /// 
@@ -60,23 +61,23 @@ class ModelLoader {
   /// 目前主要使用 Assimp 库进行加载。
   /// 
   /// @param[in] filePath 要加载的模型文件路径
-  /// @return QVector<CpuMesh> 加载成功返回网格数据数组，失败返回空数组
-  /// 
+  /// @return ModelAsset 加载成功返回网格数据与动画片段，失败返回空结果
+  ///
   /// @note 支持的格式包括：OBJ、FBX、GLTF、3DS、DAE、STL 等
   /// @note 加载失败时会输出错误信息到控制台
-  /// 
+  ///
   /// @warning 文件路径必须存在且可读，否则加载失败
   /// @warning 大型模型文件可能需要较长的加载时间
-  /// 
+  ///
   /// 使用示例：
   /// @code
   /// ModelLoader loader;
-  /// QVector<CpuMesh> meshes = loader.loadCPU("car.fbx");
-  /// if (meshes.isEmpty()) {
+  /// ModelAsset asset = loader.loadCPU("car.fbx");
+  /// if (asset.meshes.isEmpty()) {
   ///     qWarning() << "Failed to load model";
   /// }
   /// @endcode
-  QVector<CpuMesh> loadCPU(const QString& filePath);
+  ModelAsset loadCPU(const QString& filePath);
 
  private:
   /// @brief 使用 Assimp 库加载模型文件
@@ -85,17 +86,17 @@ class ModelLoader {
   /// 导入场景数据并将其转换为内部的 CpuMesh 格式。
   /// 
   /// @param[in] path 模型文件的绝对路径
-  /// @return QVector<CpuMesh> 转换后的网格数据数组
-  /// 
+  /// @return ModelAsset 转换后的网格数据与动画片段
+  ///
   /// @note 内部处理包括：
   /// - 场景遍历和网格提取
   /// - 坐标系转换（右手坐标系）
   /// - 法线计算和归一化
   /// - 包围盒计算
-  /// - 数据优化和清理
-  /// 
+  /// - 节点关键帧动画提取
+  ///
   /// @warning 该方法假设输入文件格式有效
-  QVector<CpuMesh> loadWithAssimp(const QString& path);
+  ModelAsset loadWithAssimp(const QString& path);
 
   /// @brief 检查文件扩展名是否为 Assimp 支持的格式
   /// 

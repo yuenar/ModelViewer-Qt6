@@ -47,16 +47,25 @@ Additional implemented features:
 - Display styles: Shaded / Wireframe / Wire-Shaded / Realistic
 - Orbit camera (rotation acts on the camera), camera-basis panning,
   9 view presets, adaptive near/far
-- Axis and ground grid, 4-viewport multi-view
+- Axis and ground grid, 3D axis labels (X/Y/Z), 4-viewport multi-view
 - Multi-document tabs, object list (visibility, translate/rotate/scale, undo/redo),
-  recent files
+  duplicate/rename/delete, recent files
 - Async model loading, node transforms, material color extraction, OBJ/STL export
 - 5 procedural surfaces (plane, sphere, torus, cylinder, cone)
 - Screenshot with custom resolution, HUD text overlay, cursor feedback
+- Per-object materials with a dynamic 256-slot material buffer
+- Assimp diffuse textures and procedural PBR image-based lighting
+- Section capping for the clipping plane
+- MSAA (2x/4x/8x), FXAA and depth-based AO post-processing
+- Frustum culling, distance LOD (vertex clustering), GPU buffer pool,
+  shared-material batching, render statistics in the HUD
+- Node keyframe animation (play/pause/stop/time scrub)
+- QJSEngine script console and `plugins/*.js` auto-loading
+- Scene state JSON export/import and shared-file local collaboration sync
 - Command-line automation flags (`--help`)
 
-Not implemented (long-term): textures/IBL, MSAA/AO/post-processing, animation,
-model editing, collaboration, plugins, section capping, 3D text labels.
+Long-term items not implemented: skeletal skinning, network collaboration,
+C++ ABI plugins, view transition history.
 
 ### Rendering Effects Gallery
 
@@ -227,6 +236,17 @@ cmake --build . --config Release
 - **Light Settings**: Tools → Light Settings, configure light source properties
 - **Background Settings**: Tools → Background Settings, customize background color
 - **Screenshot**: Tools → Screenshot, save current rendering frame (optional WxH)
+- **Anti-Aliasing / Post**: View → Anti-Aliasing (MSAA 2x/4x/8x),
+  View → Post-Processing (FXAA, Depth AO)
+- **Animation**: Tools → Animation (play/pause, stop, clip info)
+- **Model Editing**: Edit menu or object dock (Duplicate `Ctrl+D`,
+  Rename `F2`, Delete `Del`)
+- **Script Console**: Tools → Script Console; `viewer.*` API and `console.log()`.
+  JavaScript files in `plugins/` next to the executable auto-load.
+- **Collaboration**: Tools → Collaboration (export/import scene JSON,
+  local shared-file sync)
+- **Automation flags**: `--msaa`, `--fxaa`, `--ao`, `--animate`, `--anim-time`,
+  `--script`, `--scene-export`, `--scene-import`, `--stats`
 
 #### Keyboard Shortcuts
 - `Space`: Reset view, `F`: Fit to view
@@ -235,6 +255,8 @@ cmake --build . --config Release
 - `P`: Perspective/orthographic, `M`: Multi-view, `A`: Axis, `G`: Grid
 - `R`/`T`/`Z`/`V`: Rotate/Pan/Zoom/Select tool
 - `Ctrl+T` / `Ctrl+W`: New / close tab, `Ctrl+Z` / `Ctrl+Y`: Undo / redo
+- `Ctrl+D` / `F2` / `Del`: Duplicate / rename / delete object
+- `Ctrl+P`: Play/pause animation
 - `F11`: Fullscreen
 
 ### Development Guide
@@ -374,15 +396,23 @@ PBR（Cook-Torrance + metallic/roughness）、阴影映射（比较采样器 + 3
 新增功能：
 - 四种显示风格：Shaded / Wireframe / Wire-Shaded / Realistic
 - 相机绕 pivot 旋转、基于相机基向量的平移、9 个视图预设、自适应近远面
-- 坐标轴 + 地面网格、四视口多视图
-- 多文档标签页、对象列表（可见性、平移/旋转/缩放、撤销/重做）、最近文件
+- 坐标轴 + 地面网格 + 3D 轴标签（X/Y/Z）、四视口多视图
+- 多文档标签页、对象列表（可见性、平移/旋转/缩放、撤销/重做）、
+  复制/重命名/删除、最近文件
 - 异步加载、节点变换、材质颜色提取、OBJ/STL 导出
 - 5 种参数曲面（平面/球/环/圆柱/圆锥）
 - 自定义分辨率截图、HUD 文字覆盖层、光标反馈
+- 逐对象材质（256 槽动态材质缓冲）
+- Assimp 漫反射贴图 + PBR 程序化环境光照（IBL）
+- 裁剪平面剖面的封盖几何
+- MSAA（2x/4x/8x）、FXAA、基于深度的 AO 后处理
+- 视锥剔除、距离 LOD（顶点聚类）、GPU 缓冲池、同材质批处理、HUD 渲染统计
+- 节点关键帧动画（播放/暂停/停止/时间定位）
+- QJSEngine 脚本控制台与 `plugins/*.js` 自动加载
+- 场景状态 JSON 导入/导出与共享文件本地协作同步
 - 命令行自动化参数（`--help`）
 
-暂未实现（长期项）：纹理/IBL、MSAA/AO/后处理、动画、模型编辑、
-协作、插件、剖面封盖、3D 文字标注。
+长期项中仍未实现：骨骼蒙皮、网络实时协作、C++ ABI 插件、视图历史过渡。
 
 ### 渲染效果展示
 
@@ -535,6 +565,15 @@ make -j$(nproc)
 - **光照设置**：工具 → 光照设置，配置光源属性
 - **背景设置**：工具 → 背景设置，自定义背景颜色
 - **截图功能**：工具 → 截图，保存当前渲染画面（可选 WxH 分辨率）
+- **抗锯齿 / 后处理**：视图 → Anti-Aliasing（MSAA 2x/4x/8x）、
+  视图 → Post-Processing（FXAA、Depth AO）
+- **动画**：工具 → Animation（播放/暂停、停止、片段信息）
+- **模型编辑**：编辑菜单或对象面板（复制 `Ctrl+D`、重命名 `F2`、删除 `Del`）
+- **脚本控制台**：工具 → Script Console，使用 `viewer.*` API 与
+  `console.log()`；可执行文件旁 `plugins/` 内的 `.js` 会自动加载
+- **协作**：工具 → Collaboration（场景 JSON 导入/导出、共享文件本地同步）
+- **自动化参数**：`--msaa`、`--fxaa`、`--ao`、`--animate`、`--anim-time`、
+  `--script`、`--scene-export`、`--scene-import`、`--stats`
 
 ### 快捷键
 - `Space`：重置视图，`F`：适配视图
@@ -543,6 +582,8 @@ make -j$(nproc)
 - `P`：透视/正交，`M`：多视口，`A`：坐标轴，`G`：网格
 - `R`/`T`/`Z`/`V`：旋转/平移/缩放/选择工具
 - `Ctrl+T` / `Ctrl+W`：新建/关闭标签页，`Ctrl+Z` / `Ctrl+Y`：撤销/重做
+- `Ctrl+D` / `F2` / `Del`：复制 / 重命名 / 删除对象
+- `Ctrl+P`：播放/暂停动画
 - `F11`：全屏模式
 
 ## 开发指南

@@ -3,6 +3,7 @@
 layout(location = 0) in  vec3 fragPos;
 layout(location = 1) in  vec3 fragNormal;
 layout(location = 2) in  vec4 vLightClip;
+layout(location = 3) in  vec2 vTexCoord;
 layout(location = 0) out vec4 outColor;
 
 layout(std140, binding = 0) uniform FrameUBO {
@@ -14,14 +15,15 @@ layout(std140, binding = 0) uniform FrameUBO {
     mat4 shadowBias;
 };
 
-layout(std140, binding = 2) uniform MaterialUBO {
+layout(std140, binding = 1) uniform MaterialUBO {
     vec3  ambient;   float shininess;
     vec3  diffuse;   float metallic;
     vec3  specular;  float roughness;
 };
 
 // 深度比较采样器（与 QRhiSampler::setTextureCompareOp 配合）
-layout(binding = 1) uniform sampler2DShadow shadowMap;
+layout(binding = 2) uniform sampler2DShadow shadowMap;
+layout(binding = 3) uniform sampler2D diffuseMap;
 
 float sampleShadow(vec4 lightClip) {
     vec3 v = lightClip.xyz / lightClip.w;
@@ -52,5 +54,5 @@ void main() {
     vec3 d = diffuse * lightColor * max(dot(N, L), 0.0) * shadow;
     vec3 s = specular * lightColor * pow(max(dot(R, V), 0.0), max(shininess, 1.0)) * shadow;
 
-    outColor = vec4(a + d + s, 1.0);
+    outColor = vec4((a + d + s) * texture(diffuseMap, vTexCoord).rgb, 1.0);
 }

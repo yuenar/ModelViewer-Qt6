@@ -16,6 +16,7 @@
 #define MODELVIEWER_SRC_RENDERER_RHIRENDERER_H_
 
 #include <rhi/qrhi.h>
+#include <QImage>
 #include <QMatrix4x4>
 #include <QSize>
 #include <QString>
@@ -23,9 +24,11 @@
 #include <QVector4D>
 
 #include "../math/Camera.h"
+#include "../math/Frustum.h"
 #include "../core/Material.h"
 #include "../core/Light.h"
 #include "../core/CpuMesh.h"
+#include "BufferPool.h"
 
 class RhiMesh;
 
@@ -72,6 +75,22 @@ struct alignas(16) ShadowUBOData {
   float shadowBias[16];
 };
 
+/// @brief 后处理参数（FXAA / 深度 AO）
+struct alignas(16) PostUBOData {
+  float texelX;
+  float texelY;
+  float flipY;
+  float aoStrength;
+  float nearPlane;
+  float farPlane;
+  float aoRadius;
+  float fxaaEnabled;
+  float aoEnabled;
+  float exposure;
+  float padding0;
+  float padding1;
+};
+
 /// @brief 选择高亮颜色
 struct alignas(16) SelectionUBOData {
   float color[4];
@@ -105,6 +124,20 @@ enum class DisplayStyle {
   Wireframe = 1,
   WireShaded = 2,
   Realistic = 3
+};
+
+/// @brief 单帧渲染统计（HUD 展示 / 性能验证）
+struct RenderStats {
+  int objects = 0;        ///< 场景对象总数
+  int drawn = 0;          ///< 实际绘制对象数
+  int culled = 0;         ///< 视锥剔除对象数
+  int drawCalls = 0;      ///< 绘制调用次数
+  int triangles = 0;      ///< 提交的三角形数量
+  int lod0 = 0;           ///< 使用 LOD0 的对象数
+  int lod1 = 0;           ///< 使用 LOD1 的对象数
+  int lod2 = 0;           ///< 使用 LOD2 的对象数
+  int pooledBuffers = 0;  ///< 缓冲池缓存数量
+  int materialBatches = 0;///< 材质状态切换次数（批处理效果）
 };
 
 /// @brief 基于 Qt RHI 的跨平台渲染器
@@ -143,6 +176,29 @@ class RhiRenderer {
   void setSelectedMesh(int index) { m_selectedMesh = index; }
   int selectedMesh() const { return m_selectedMesh; }
 
+  /// @brief 设置场景漫反射贴图（空图片则使用 1x1 白色回退）
+  void setDiffuseTexture(const QImage& image);
+
+  /// @brief 视锥剔除开关（默认开启）
+  void setCullingEnabled(bool enabled) { m_cullEnabled = enabled; }
+  bool isCullingEnabled() const { return m_cullEnabled; }
+
+  /// @brief 距离 LOD 开关（默认开启）
+  void setLodEnabled(bool enabled) { m_lodEnabled = enabled; }
+  bool isLodEnabled() const { return m_lodEnabled; }
+
+  /// @brief 最近一帧的渲染统计
+  const RenderStats& stats() const { return m_stats; }
+
+  /// @brief 后处理开关（FXAA / 深度 AO）
+  ///
+  /// 开启后场景先渲染到离屏纹理，再通过全屏后处理通道输出。
+  /// 与 MSAA 互斥：MSAA 开启时应关闭后处理。
+  void setPostProcessing(bool fxaa, bool ao, float aoStrength = 0.6f);
+  bool isFxaaEnabled() const { return m_fxaaEnabled; }
+  bool isAoEnabled() const { return m_aoEnabled; }
+  bool isPostEnabled() const { return m_fxaaEnabled || m_aoEnabled; }
+
   void render(QRhiCommandBuffer* cb,
               const QVector<RhiMesh*>& meshes,
               const Camera& cam,
@@ -162,6 +218,7 @@ class RhiRenderer {
     QRhiGraphicsPipeline::CullMode cull = QRhiGraphicsPipeline::Back;
     QRhiGraphicsPipeline::FrontFace frontFace = QRhiGraphicsPipeline::CCW;
     QRhiRenderPassDescriptor* renderPass = nullptr;
+    int sampleCount = -1;   ///< -1 自动（离屏/交换链），否则使用指定采样数
   };
 
   QRhiGraphicsPipeline* createPipeline(const PipelineDesc& desc);
@@ -173,6 +230,23 @@ class RhiRenderer {
   void destroyShadowResources();
   void createSkyboxGeometry(QRhiCommandBuffer* cb);
   void destroySkyboxGeometry();
+  void createDiffuseTexture();
+  void destroyDiffuseTexture();
+
+  /// @brief 创建/重建离屏场景渲染目标（尺寸变化时）
+  void ensureSceneTarget(const QSize& size);
+  void destroySceneTarget();
+  void createPostResources();
+  void destroyPostResources();
+  void drawPost(QRhiCommandBuffer* cb);
+
+  void rebuildCapGeometry(const QVector<RhiMesh*>& meshes);
+  void uploadCapGeometry(QRhiResourceUpdateBatch* batch);
+  void drawCap(QRhiCommandBuffer* cb, int slot);
+
+  void createLabelResources(QRhiCommandBuffer* cb);
+  void destroyLabelResources();
+  void drawAxisLabels(QRhiCommandBuffer* cb, int slot);
 
   void buildAllPipelines();
   void destroyPipelines();
@@ -189,7 +263,8 @@ class RhiRenderer {
   void drawBackground(QRhiCommandBuffer* cb);
   void drawSkybox(QRhiCommandBuffer* cb);
   void drawMeshesIndexed(QRhiCommandBuffer* cb, const QVector<RhiMesh*>& meshes,
-                         QRhiShaderResourceBindings* srb, int slot);
+                         QRhiShaderResourceBindings* srb, int slot,
+                         bool useMaterial = false);
   void drawWireframe(QRhiCommandBuffer* cb, const QVector<RhiMesh*>& meshes,
                      QRhiShaderResourceBindings* srb, int slot);
   void drawNormalLines(QRhiCommandBuffer* cb, const QVector<RhiMesh*>& meshes,
@@ -200,9 +275,19 @@ class RhiRenderer {
                      float width, float height);
   void updateSceneBounds(const QVector<RhiMesh*>& meshes);
 
+  /// @brief 切换当前视口的相机状态（视锥、LOD、包围球测试使用）
+  void beginSlot(int slot);
+  bool isMeshCulled(const RhiMesh* mesh) const;
+  int lodLevelFor(const RhiMesh* mesh) const;
+
   QRhiCommandBuffer::DynamicOffset frameOffset(int slot) const {
     return QRhiCommandBuffer::DynamicOffset(
         0, quint32(slot) * quint32(m_frameStride));
+  }
+
+  QRhiCommandBuffer::DynamicOffset materialOffset(int slot) const {
+    return QRhiCommandBuffer::DynamicOffset(
+        1, quint32(slot) * quint32(m_materialStride));
   }
 
   // ── 顶点布局 ──────────────────────────────────────────────
@@ -221,6 +306,13 @@ class RhiRenderer {
   int m_frameStride = 0;
   int m_frameSlots = 8;
   QRhiBuffer* m_materialUBO = nullptr;
+  int m_materialStride = 0;
+  int m_materialSlots = 256;
+  QRhiTexture* m_diffuseTexture = nullptr;
+  QRhiSampler* m_diffuseSampler = nullptr;
+  QImage m_diffuseImage;
+  bool m_diffuseDirty = false;
+  bool m_diffuseUploadPending = false;
   QRhiBuffer* m_bgUBO = nullptr;
   QRhiBuffer* m_bgVBuf = nullptr;
   QRhiBuffer* m_normalUBO = nullptr;
@@ -282,9 +374,42 @@ class RhiRenderer {
   QRhiGraphicsPipeline* m_selectionPipeline = nullptr;
   QRhiShaderResourceBindings* m_selectionSrb = nullptr;
 
+  // ── 后处理（FXAA / AO）────────────────────────────────────
+  bool m_fxaaEnabled = false;
+  bool m_aoEnabled = false;
+  float m_aoStrength = 0.6f;
+  QRhiTexture* m_sceneColor = nullptr;
+  QRhiTexture* m_sceneDepth = nullptr;
+  QRhiTextureRenderTarget* m_sceneRt = nullptr;
+  QRhiRenderPassDescriptor* m_sceneRp = nullptr;
+  QRhiSampler* m_sceneColorSampler = nullptr;
+  QRhiSampler* m_sceneDepthSampler = nullptr;
+  QSize m_sceneSize;
+  QRhiBuffer* m_postUBO = nullptr;
+  QRhiBuffer* m_postVBuf = nullptr;
+  QRhiGraphicsPipeline* m_postPipeline = nullptr;
+  QRhiShaderResourceBindings* m_postSrb = nullptr;
+  QRhiRenderPassDescriptor* m_pipelineRp = nullptr;  ///< 场景管线使用的渲染通道
+
   // ── 裁剪平面 ──────────────────────────────────────────────
   QRhiGraphicsPipeline* m_clippedPipeline = nullptr;
   QRhiShaderResourceBindings* m_clippedSrb = nullptr;
+
+  // ── 剖面封盖 ──────────────────────────────────────────────
+  QRhiGraphicsPipeline* m_capPipeline = nullptr;
+  QRhiShaderResourceBindings* m_capSrb = nullptr;
+  QRhiBuffer* m_capVBuf = nullptr;
+  int m_capVertexCount = 0;
+  bool m_capDirty = true;
+  QVector<QVector3D> m_capVerts;
+
+  // ── 3D 文字标注（轴标签）──────────────────────────────────
+  QRhiTexture* m_labelTexture = nullptr;
+  QRhiSampler* m_labelSampler = nullptr;
+  QRhiGraphicsPipeline* m_labelPipeline = nullptr;
+  QRhiShaderResourceBindings* m_labelSrb = nullptr;
+  QRhiBuffer* m_labelVBuf = nullptr;
+  int m_labelVertexCount = 0;
 
   // ── 状态 ──────────────────────────────────────────────────
   RenderMode m_renderMode = RenderMode::Phong;
@@ -292,6 +417,19 @@ class RhiRenderer {
   bool m_multiView = false;
   bool m_meshesUploaded = false;
   int m_selectedMesh = -1;
+
+  // ── 剔除 / LOD / 批处理 / 缓冲池 ──────────────────────────
+  BufferPool m_bufferPool;             ///< 网格 GPU 缓冲对象池
+  bool m_cullEnabled = true;
+  bool m_lodEnabled = true;
+  Frustum m_frustum;                   ///< 当前视口视锥
+  bool m_frustumValid = false;
+  QVector3D m_slotEye[4];              ///< 各视口相机位置
+  QMatrix4x4 m_slotViewProj[4];        ///< 各视口 view-projection
+  float m_slotProjScale[4] = {0.4f, 0.4f, 0.4f, 0.4f};
+  int m_currentSlot = 0;
+  QVector<int> m_meshMaterialSlot;     ///< 每个对象复用的材质槽位
+  RenderStats m_stats;
 
   QVector3D m_bgTopColor{0.2f, 0.2f, 0.3f};
   QVector3D m_bgBotColor{0.1f, 0.1f, 0.15f};

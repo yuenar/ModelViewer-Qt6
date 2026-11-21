@@ -19,10 +19,12 @@
 #include <QElapsedTimer>
 #include <QMatrix4x4>
 #include <QPoint>
+#include <QTimer>
 #include <QVector4D>
 #include "../math/Camera.h"
 #include "../core/Material.h"
 #include "../core/Light.h"
+#include "../core/Animation.h"
 #include "../renderer/RhiMesh.h"
 
 class RhiRenderer;
@@ -56,6 +58,8 @@ class RhiWidget : public QRhiWidget {
 
   void setMaterial(const Material& mat);
   Material getMaterial() const { return m_material; }
+  void setMeshMaterial(int index, const Material& mat);
+  Material meshMaterial(int index) const;
   void setLight(const Light& light);
   Light getLight() const { return m_light; }
 
@@ -101,6 +105,11 @@ class RhiWidget : public QRhiWidget {
   void showAllMeshes(bool visible);
   void swapMeshVisibility();
 
+  /// @brief 模型编辑：删除 / 复制 / 重命名
+  bool removeMeshAt(int index);
+  int duplicateMeshAt(int index);
+  bool renameMeshAt(int index, const QString& name);
+
   BoundingBox sceneBoundingBox() const { return m_sceneBbox; }
   QString sourceLabel() const { return m_sourceLabel; }
   QVector<CpuMesh> cpuMeshes() const;
@@ -108,6 +117,38 @@ class RhiWidget : public QRhiWidget {
   float fps() const { return m_fps; }
   QString renderModeName() const;
   QString displayStyleName() const;
+
+  /// @brief 单帧渲染统计摘要（绘制调用/剔除/LOD/缓冲池）
+  QString renderStatsText() const;
+
+  /// @brief 视锥剔除与距离 LOD 开关
+  void setCullingEnabled(bool enabled);
+  bool isCullingEnabled() const { return m_cullEnabled; }
+  void setLodEnabled(bool enabled);
+  bool isLodEnabled() const { return m_lodEnabled; }
+
+  /// @brief MSAA 采样数（1 关闭，常用 2/4）
+  void setMsaaSampleCount(int samples);
+  int msaaSampleCount() const { return sampleCount(); }
+
+  /// @brief 后处理开关（FXAA / 深度 AO），与 MSAA 互斥
+  void setPostProcessing(bool fxaa, bool ao);
+  bool isFxaaEnabled() const { return m_fxaaEnabled; }
+  bool isAoEnabled() const { return m_aoEnabled; }
+
+  // ── 动画（节点关键帧）────────────────────────────────────
+  void setAnimationClips(const QVector<AnimationClip>& clips);
+  int animationCount() const { return m_animationClips.size(); }
+  QString animationName(int index) const;
+  float animationDuration(int index) const;
+  void playAnimation(int index);
+  void pauseAnimation();
+  void stopAnimation();
+  bool isAnimationPlaying() const { return m_animPlaying; }
+  int currentAnimation() const { return m_animClip; }
+  float animationTime() const { return m_animTime; }
+  void setAnimationTime(float seconds);
+  void setAnimationSpeed(float speed) { m_animSpeed = speed; }
 
   Camera& getCamera() { return m_camera; }
   const Camera& getCamera() const { return m_camera; }
@@ -132,6 +173,9 @@ class RhiWidget : public QRhiWidget {
   QVector3D unproject(const QPoint& pos, float ndcZ) const;
   void updateCursorForTool();
   void updateFps();
+  void applyAnimationTime(float time);
+  void advanceAnimation();
+  void resetAnimationDeltas();
 
   RhiRenderer* m_renderer = nullptr;
   Camera m_camera;
@@ -153,14 +197,28 @@ class RhiWidget : public QRhiWidget {
   QVector4D m_clipPlane{-1.0f, 0.0f, 0.0f, 0.0f};
   bool m_axisVisible = false;
   bool m_gridVisible = false;
+  bool m_cullEnabled = true;
+  bool m_lodEnabled = true;
+  bool m_fxaaEnabled = false;
+  bool m_aoEnabled = false;
   ToolMode m_toolMode = ToolMode::Rotate;
   QVector3D m_bgTopColor{0.2f, 0.2f, 0.3f};
   QVector3D m_bgBotColor{0.1f, 0.1f, 0.15f};
+  QImage m_pendingDiffuseTexture;
 
   QWidget* m_hud = nullptr;
   QElapsedTimer m_fpsTimer;
   int m_frameCounter = 0;
   float m_fps = 0.0f;
+
+  // ── 动画状态 ─────────────────────────────────────────────
+  QVector<AnimationClip> m_animationClips;
+  QTimer* m_animTimer = nullptr;
+  QElapsedTimer m_animClock;
+  int m_animClip = -1;
+  float m_animTime = 0.0f;
+  float m_animSpeed = 1.0f;
+  bool m_animPlaying = false;
 };
 
 #endif  // MODELVIEWER_SRC_UI_RHIWIDGET_H_

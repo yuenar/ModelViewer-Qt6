@@ -17,6 +17,7 @@
 #include <QCommandLineParser>
 #include <QTimer>
 #include <QDebug>
+#include <cstdio>
 #include "ui/MainWindow.h"
 
 /// @brief ModelViewer 应用程序入口点
@@ -58,9 +59,23 @@ int main(int argc, char* argv[]) {
   QCommandLineOption toolOption("tool", "Interaction tool (0-3).", "tool", "-1");
   QCommandLineOption transformOption(
       "transform", "Object transform: tx,ty,tz,rx,ry,rz,sx,sy,sz.", "values");
+  QCommandLineOption colorOption("mesh-color",
+                                 "Selected mesh diffuse color: r,g,b (0..1).", "rgb");
   QCommandLineOption screenshotOption("screenshot", "Save screenshot and exit.", "file");
   QCommandLineOption exportOption("export", "Export model and exit.", "file");
   QCommandLineOption delayOption("delay", "Delay before screenshot (ms).", "ms", "2000");
+  QCommandLineOption msaaOption("msaa", "MSAA sample count (1/2/4/8).", "samples", "1");
+  QCommandLineOption fxaaOption("fxaa", "Enable FXAA post-processing.");
+  QCommandLineOption aoOption("ao", "Enable depth AO post-processing.");
+  QCommandLineOption statsOption("stats", "Print render statistics before screenshot.");
+  QCommandLineOption animateOption("animate", "Play the first animation clip.");
+  QCommandLineOption animTimeOption(
+      "anim-time", "Set animation time in seconds (deterministic screenshot).", "sec", "-1");
+  QCommandLineOption scriptOption("script", "Run a JavaScript file after load.", "file");
+  QCommandLineOption sceneExportOption("scene-export",
+                                       "Export scene state JSON and continue.", "file");
+  QCommandLineOption sceneImportOption("scene-import",
+                                       "Import scene state JSON after load.", "file");
 
   parser.addOption(modelOption);
   parser.addOption(surfaceOption);
@@ -73,9 +88,19 @@ int main(int argc, char* argv[]) {
   parser.addOption(gridOption);
   parser.addOption(toolOption);
   parser.addOption(transformOption);
+  parser.addOption(colorOption);
   parser.addOption(screenshotOption);
   parser.addOption(exportOption);
   parser.addOption(delayOption);
+  parser.addOption(msaaOption);
+  parser.addOption(fxaaOption);
+  parser.addOption(aoOption);
+  parser.addOption(statsOption);
+  parser.addOption(animateOption);
+  parser.addOption(animTimeOption);
+  parser.addOption(scriptOption);
+  parser.addOption(sceneExportOption);
+  parser.addOption(sceneImportOption);
   parser.process(app);
 
   MainWindow window;
@@ -114,10 +139,21 @@ int main(int argc, char* argv[]) {
       window.setToolMode(tool);
     }
   }
+  if (parser.isSet(msaaOption)) {
+    window.setMsaa(parser.value(msaaOption).toInt());
+  }
+  if (parser.isSet(fxaaOption)) {
+    window.setFxaaEnabled(true);
+  }
+  if (parser.isSet(aoOption)) {
+    window.setAoEnabled(true);
+  }
 
   // 需要模型/曲面加载完成后再执行
   auto applySceneOptions = [&window, &parser, &viewOption, &selectOption,
-                            &transformOption]() {
+                            &transformOption, &colorOption, &animateOption,
+                            &animTimeOption, &scriptOption,
+                            &sceneExportOption, &sceneImportOption]() {
     if (parser.isSet(viewOption)) {
       bool ok = false;
       const int preset = parser.value(viewOption).toInt(&ok);
@@ -142,9 +178,43 @@ int main(int argc, char* argv[]) {
                                       translate, rotate, scale);
       }
     }
+
+    if (parser.isSet(colorOption)) {
+      const QStringList parts = parser.value(colorOption).split(',');
+      if (parts.size() == 3) {
+        window.setMeshColor(qMax(0, selectedIndex),
+                            QVector3D(parts[0].toFloat(),
+                                      parts[1].toFloat(),
+                                      parts[2].toFloat()));
+      }
+    }
+
+    if (parser.isSet(animateOption)) {
+      window.playAnimation();
+    }
+    if (parser.isSet(animTimeOption)) {
+      const float seconds = parser.value(animTimeOption).toFloat();
+      if (seconds >= 0.0f) {
+        window.setAnimationTime(seconds);
+      }
+    }
+
+    if (parser.isSet(sceneImportOption)) {
+      window.importSceneState(parser.value(sceneImportOption));
+    }
+    if (parser.isSet(scriptOption)) {
+      window.runScriptFile(parser.value(scriptOption));
+    }
+    if (parser.isSet(sceneExportOption)) {
+      window.exportSceneState(parser.value(sceneExportOption));
+    }
   };
 
-  auto captureAndQuit = [&window, &parser, &screenshotOption]() {
+  auto captureAndQuit = [&window, &parser, &screenshotOption, &statsOption]() {
+    if (parser.isSet(statsOption)) {
+      std::printf("RENDER_STATS: %s\n", window.renderStatsText().toUtf8().constData());
+      std::fflush(stdout);
+    }
     window.saveScreenshotTo(parser.value(screenshotOption));
     QTimer::singleShot(150, qApp, &QApplication::quit);
   };

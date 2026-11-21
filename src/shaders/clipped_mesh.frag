@@ -2,7 +2,10 @@
 
 layout(location = 0) in  vec3 fragPos;
 layout(location = 1) in  vec3 fragNormal;
+layout(location = 2) in  vec2 vTexCoord;
 layout(location = 0) out vec4 outColor;
+
+layout(binding = 3) uniform sampler2D diffuseMap;
 
 layout(std140, binding = 0) uniform FrameUBO {
     mat4 model; mat4 view; mat4 projection; mat4 normalMatrix;
@@ -35,5 +38,5 @@ void main() {
     vec3 d = diffuse * lightColor * max(dot(N, L), 0.0);
     vec3 s = specular * lightColor * pow(max(dot(R, V), 0.0), max(shininess, 1.0));
 
-    outColor = vec4(a + d + s, 1.0);
+    outColor = vec4((a + d + s) * texture(diffuseMap, vTexCoord).rgb, 1.0);
 }
