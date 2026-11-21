@@ -17,6 +17,8 @@
 
 #include <QVector3D>
 #include <QVector2D>
+#include <QString>
+#include <QVector>
 #include "../math/BoundingBox.h"
 
 /// @brief CPU 端网格数据结构，用于存储 3D 模型的几何数据
@@ -58,7 +60,6 @@ struct CpuMesh {
   /// 每个顶点包含位置、法线和纹理坐标信息。
   /// 顶点的顺序决定了索引数组如何引用它们。
   QVector<Vertex> vertices;
-  
   /// @brief 索引数组，用于定义三角形的拓扑结构
   /// 
   /// 每三个连续的索引值构成一个三角形。
@@ -71,6 +72,12 @@ struct CpuMesh {
   /// 包围盒是一个轴对齐的六面体，完全包含网格的所有顶点。
   /// 用于优化渲染性能，快速判断物体是否在视野内。
   BoundingBox bbox;
+
+  /// @brief 网格名称（来自文件节点或程序化生成）
+  QString name;
+
+  /// @brief 基础颜色（来自材质 diffuse，用于加载后初始化材质）
+  QVector3D baseColor{0.8f, 0.8f, 0.8f};
 };
 
 #endif  // MODELVIEWER_SRC_CORE_CPUMESH_H_

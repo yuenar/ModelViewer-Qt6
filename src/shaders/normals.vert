@@ -14,13 +14,10 @@ layout(std140, binding = 0) uniform FrameUBO {
     vec3 viewPos;    float _p2;
 };
 
-out VS_OUT {
-    layout(location = 0) vec3 normal;
-    layout(location = 1) vec3 position;
-} vs_out;
+layout(location = 0) out vec3 vNormalColor;
 
 void main() {
-    vs_out.position = (model * vec4(inPosition, 1.0)).xyz;
-    vs_out.normal = mat3(normalMatrix) * inNormal;
+    vec3 n = normalize(mat3(normalMatrix) * inNormal);
+    vNormalColor = n * 0.5 + 0.5;   // 法线映射到 RGB
     gl_Position = projection * view * model * vec4(inPosition, 1.0);
 }

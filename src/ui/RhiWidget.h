@@ -16,264 +16,151 @@
 #define MODELVIEWER_SRC_UI_RHIWIDGET_H_
 
 #include <QRhiWidget>
+#include <QElapsedTimer>
+#include <QMatrix4x4>
 #include <QPoint>
+#include <QVector4D>
 #include "../math/Camera.h"
 #include "../core/Material.h"
 #include "../core/Light.h"
 #include "../renderer/RhiMesh.h"
 
 class RhiRenderer;
+class QWidget;
+
+/// @brief 交互工具
+enum class ToolMode {
+  Rotate = 0,
+  Pan = 1,
+  Zoom = 2,
+  Select = 3
+};
 
 /// @brief 基于 Qt RHI 的 3D 渲染控件
-/// 
-/// 该类继承自 QRhiWidget，是 ModelViewer 的核心渲染组件。
-/// 负责管理渲染器、摄像机、材质、光照等核心功能，
-/// 并处理用户的鼠标交互事件。
-/// 
-/// 主要功能：
-/// - 渲染器管理：创建和配置 RhiRenderer
-/// - 场景管理：加载和管理 3D 模型
-/// - 摄像机控制：旋转、平移、缩放
-/// - 材质和光照：实时调整渲染参数
-/// - 鼠标交互：轨迹球控制和视图操作
-/// 
-/// 生命周期：
-/// 1. 构造：初始化基本状态
-/// 2. initialize()：创建渲染器和资源
-/// 3. render()：每帧渲染调用
-/// 4. 析构：释放所有 GPU 资源
-/// 
-/// 使用示例：
-/// @code
-/// RhiWidget* widget = new RhiWidget(parent);
-/// widget->loadModel("model.obj");
-/// widget->show();
-/// @endcode
 class RhiWidget : public QRhiWidget {
   Q_OBJECT
-  
+
  public:
-  /// @brief 构造函数
-  /// 
-  /// @param[in] parent 父窗口指针，默认为 nullptr
   explicit RhiWidget(QWidget* parent = nullptr);
-  
-  /// @brief 析构函数
-  /// 
-  /// 安全释放所有 GPU 资源，包括渲染器和网格数据。
-  /// 确保 RHI 上下文有效时进行资源清理。
   ~RhiWidget() override;
-  
-  /// @brief 加载 3D 模型文件
-  /// 
-  /// 清除当前场景，加载新的 3D 模型。
-  /// 支持多种格式，具体格式由 ModelLoader 决定。
-  /// 
-  /// @param[in] filePath 模型文件的完整路径
-  /// 
-  /// @note 加载失败时会输出警告信息
-  /// @note 会自动调整摄像机视角以适配新模型
+
   void loadModel(const QString& filePath);
-  
-  /// @brief 设置渲染模式
-  /// 
-  /// 切换不同的渲染效果，如 Phong、PBR、线框等。
-  /// 
-  /// @param[in] mode 渲染模式的整数值
-  /// 
-  /// @note 具体模式值由 RhiRenderer::RenderMode 定义
+  void setCPUMeshes(const QVector<CpuMesh>& meshes, const QString& label);
+
   void setRenderMode(int mode);
-  
-  /// @brief 设置材质参数
-  /// 
-  /// 更新当前场景的材质属性，包括环境光、漫反射、
-  /// 镜面反射和光泽度参数。
-  /// 
-  /// @param[in] mat 新的材质参数
-  /// 
-  /// @note 修改后会触发重新渲染
+  int renderMode() const { return m_renderMode; }
+  void setDisplayStyle(int style);
+  int displayStyle() const { return m_displayStyle; }
+  void setMultiView(bool enabled);
+  bool isMultiView() const { return m_multiView; }
+
   void setMaterial(const Material& mat);
-  
-  /// @brief 获取当前材质参数
-  /// 
-  /// @return Material 当前的材质设置
   Material getMaterial() const { return m_material; }
-  
-  /// @brief 设置光源参数
-  /// 
-  /// 更新场景中的光源属性，包括位置和颜色。
-  /// 
-  /// @param[in] light 新的光源参数
-  /// 
-  /// @note 修改后会触发重新渲染
   void setLight(const Light& light);
-  
-  /// @brief 获取当前光源参数
-  /// 
-  /// @return Light 当前的光源设置
   Light getLight() const { return m_light; }
-  
-  /// @brief 设置背景颜色
-  /// 
-  /// 设置渐变背景的顶部和底部颜色。
-  /// 
-  /// @param[in] topColor 顶部颜色（RGB）
-  /// @param[in] botColor 底部颜色（RGB）
+
   void setBackgroundColors(const QVector3D& topColor, const QVector3D& botColor);
-  
-  /// @brief 适配视图以包含整个场景
-  /// 
-  /// 自动调整摄像机的位置和朝向，
-  /// 确保场景中的所有物体都在视野范围内。
   void fitToView();
-  
-  /// @brief 保存当前渲染画面为截图
-  /// 
-  /// 将当前帧缓冲区内容保存为图片文件。
-  /// 
-  /// @param[in] filePath 保存文件的完整路径
-  /// 
-  /// @note 支持的格式由 QImage.save() 决定（PNG、JPG 等）
-  /// @note 保存失败时会输出警告信息
+  void applyViewPreset(int preset);
+
+  void applyMaterialPreset(const QString& name);
+
   void saveScreenshot(const QString& filePath);
-  
-  /// @brief 切换投影模式
-  /// 
-  /// 在透视投影和正交投影之间切换。
-  /// 透视投影模拟人眼视觉效果，正交投影保持实际比例。
-  void toggleProjection();
-  
-  /// @brief 获取摄像机对象
-  /// 
-  /// @return Camera& 摄像机对象的引用
-  Camera& getCamera() { return m_camera; }
-  
-  /// @brief 保存当前渲染画面为截图（增强版）
-  /// 
-  /// 将当前帧缓冲区内容保存为图片文件，支持多种格式。
-  /// 
-  /// @param[in] filePath 保存文件的完整路径
-  /// @param[in] format 图片格式（"png", "jpg", "bmp" 等）
-  /// @param[in] quality JPEG 质量（0-100，仅对 JPEG 有效）
-  /// 
-  /// @return bool 保存是否成功
-  bool saveScreenshotEx(const QString& filePath, const QString& format = "png", int quality = 95);
-  
-  /// @brief 获取模型统计信息
-  /// 
-  /// 返回当前加载模型的统计信息，包括顶点数、三角形数等。
-  /// 
-  /// @return QString 格式化的统计信息字符串
+  bool saveScreenshotEx(const QString& filePath, const QString& format = "png",
+                        int quality = 95);
+  bool saveScreenshotScaled(const QString& filePath, int width, int height);
   QString getModelStatistics() const;
-  
+
+  void setProjectionType(ProjectionType type);
+  void toggleProjection();
+  bool isOrthographic() const;
+
+  void setNormalLength(float length);
+  void setClippingPlane(const QVector4D& plane);
+  QVector4D clippingPlane() const { return m_clipPlane; }
+
+  void selectMesh(int index);
+  int selectedMesh() const { return m_selectedMesh; }
+
+  void setAxisVisible(bool visible);
+  bool isAxisVisible() const { return m_axisVisible; }
+  void setGridVisible(bool visible);
+  bool isGridVisible() const { return m_gridVisible; }
+
+  void setToolMode(ToolMode mode);
+  ToolMode toolMode() const { return m_toolMode; }
+
+  // ── 对象列表接口 ─────────────────────────────────────────
+  int meshCount() const { return m_meshes.size(); }
+  QString meshName(int index) const;
+  bool isMeshVisible(int index) const;
+  void setMeshVisible(int index, bool visible);
+  QMatrix4x4 meshTransform(int index) const;
+  void setMeshTransform(int index, const QMatrix4x4& transform);
+  void resetMeshTransform(int index);
+  void showAllMeshes(bool visible);
+  void swapMeshVisibility();
+
+  BoundingBox sceneBoundingBox() const { return m_sceneBbox; }
+  QString sourceLabel() const { return m_sourceLabel; }
+  QVector<CpuMesh> cpuMeshes() const;
+
+  float fps() const { return m_fps; }
+  QString renderModeName() const;
+  QString displayStyleName() const;
+
+  Camera& getCamera() { return m_camera; }
+  const Camera& getCamera() const { return m_camera; }
+
+ signals:
+  void projectionChanged(bool orthographic);
+  void meshesChanged();
+
  protected:
-  /// @brief 初始化渲染资源
-  /// 
-  /// QRhiWidget 的虚函数重写，在控件首次显示时调用。
-  /// 创建渲染器实例并初始化所有 GPU 资源。
-  /// 
-  /// @param[in] cb RHI 命令缓冲区，用于资源创建
   void initialize(QRhiCommandBuffer* cb) override;
-  
-  /// @brief 渲染函数
-  /// 
-  /// QRhiWidget 的虚函数重写，每帧调用一次。
-  /// 执行实际的 3D 渲染操作。
-  /// 
-  /// @param[in] cb RHI 命令缓冲区，用于录制渲染命令
   void render(QRhiCommandBuffer* cb) override;
-  
-  /// @brief 鼠标按下事件处理
-  /// 
-  /// 记录鼠标按下位置和按钮，开始交互操作。
-  /// 
-  /// @param[in] e 鼠标事件对象
+  void releaseResources() override;
+
+  void resizeEvent(QResizeEvent*) override;
   void mousePressEvent(QMouseEvent*) override;
-  
-  /// @brief 鼠标移动事件处理
-  /// 
-  /// 根据当前按下的按钮执行相应的操作：
-  /// - 左键：旋转模型
-  /// - 中键：平移视图
-  /// 
-  /// @param[in] e 鼠标事件对象
   void mouseMoveEvent(QMouseEvent*) override;
-  
-  /// @brief 鼠标释放事件处理
-  /// 
-  /// 清除当前按下的按钮状态。
-  /// 
-  /// @param[in] e 鼠标事件对象
   void mouseReleaseEvent(QMouseEvent*) override;
-  
-  /// @brief 鼠标滚轮事件处理
-  /// 
-  /// 执行视图缩放操作。
-  /// 
-  /// @param[in] e 滚轮事件对象
   void wheelEvent(QWheelEvent*) override;
-  
-  /// @brief 键盘按键事件处理
-  /// 
-  /// 处理快捷键操作：
-  /// - F：聚焦视图
-  /// - Space：重置视图
-  /// - W：切换线框模式
-  /// - N：显示法线
-  /// - L：切换光照
-  /// - S：切换阴影
-  /// - P：切换投影
-  /// - F11：全屏模式
-  /// 
-  /// @param[in] e 键盘事件对象
-  void keyPressEvent(QKeyEvent*) override;
-  
+
  private:
-  /// @brief 渲染器实例
-  /// 
-  /// 负责实际的 GPU 渲染操作。
-  /// 在 initialize() 中创建，在析构函数中释放。
-  RhiRenderer*         m_renderer  = nullptr;
-  
-  /// @brief 摄像机对象
-  /// 
-  /// 管理 3D 场景的视角、投影和用户交互。
-  /// 处理旋转、平移、缩放等操作。
-  Camera               m_camera;
-  
-  /// @brief 当前材质参数
-  /// 
-  /// Phong 光照模型的材质参数，包括环境光、漫反射、
-  /// 镜面反射和光泽度。
-  Material             m_material;
-  
-  /// @brief 当前光源参数
-  /// 
-  /// 场景中的点光源参数，包括位置和颜色。
-  Light                m_light;
-  
-  /// @brief 场景中的网格列表
-  /// 
-  /// 存储所有已加载的 3D 模型网格。
-  /// 每个网格包含顶点数据、索引数据和 GPU 资源。
-  QVector<RhiMesh*>    m_meshes;
-  
-  /// @brief 场景包围盒
-  /// 
-  /// 包含场景中所有物体的轴对齐包围盒。
-  /// 用于视图适配和碰撞检测。
-  BoundingBox          m_sceneBbox;
-  
-  /// @brief 上次鼠标位置
-  /// 
-  /// 用于计算鼠标移动的增量。
-  /// 在鼠标按下和移动事件中更新。
-  QPoint               m_lastMousePos;
-  
-  /// @brief 当前按下的鼠标按钮
-  /// 
-  /// 跟踪当前激活的鼠标按钮，用于区分不同的交互模式。
-  Qt::MouseButton      m_activeButton = Qt::NoButton;
+  int pickMesh(const QPoint& pos) const;
+  QVector3D unproject(const QPoint& pos, float ndcZ) const;
+  void updateCursorForTool();
+  void updateFps();
+
+  RhiRenderer* m_renderer = nullptr;
+  Camera m_camera;
+  Material m_material;
+  Light m_light;
+  QVector<RhiMesh*> m_meshes;
+  BoundingBox m_sceneBbox;
+  QString m_sourceLabel;
+
+  QPoint m_lastMousePos;
+  QPoint m_pressPos;
+  Qt::MouseButton m_activeButton = Qt::NoButton;
+  bool m_dragged = false;
+
+  int m_selectedMesh = -1;
+  int m_renderMode = 0;
+  int m_displayStyle = 0;
+  bool m_multiView = false;
+  QVector4D m_clipPlane{-1.0f, 0.0f, 0.0f, 0.0f};
+  bool m_axisVisible = false;
+  bool m_gridVisible = false;
+  ToolMode m_toolMode = ToolMode::Rotate;
+  QVector3D m_bgTopColor{0.2f, 0.2f, 0.3f};
+  QVector3D m_bgBotColor{0.1f, 0.1f, 0.15f};
+
+  QWidget* m_hud = nullptr;
+  QElapsedTimer m_fpsTimer;
+  int m_frameCounter = 0;
+  float m_fps = 0.0f;
 };
 
 #endif  // MODELVIEWER_SRC_UI_RHIWIDGET_H_

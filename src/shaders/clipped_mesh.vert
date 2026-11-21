@@ -1,36 +1,25 @@
-#version 450 core
+#version 460
 
-layout(location = 0) in vec3 vertexPosition;
+layout(location = 0) in vec3 inPosition;
+layout(location = 1) in vec3 inNormal;
+layout(location = 2) in vec2 inTexCoord;
 
-layout(std140, binding = 0) uniform TransformUBO {
-    mat4 modelMatrix;
-    mat4 viewMatrix;
-    mat4 projectionMatrix;
+layout(std140, binding = 0) uniform FrameUBO {
+    mat4 model;
+    mat4 view;
+    mat4 projection;
+    mat4 normalMatrix;
+    vec3 lightPos;   float _p0;
+    vec3 lightColor; float _p1;
+    vec3 viewPos;    float _p2;
 };
 
-layout(std140, binding = 1) uniform ClipPlanesUBO {
-    vec4 clipPlaneX;
-    vec4 clipPlaneY;
-    vec4 clipPlaneZ;
-    vec4 clipPlane;
-};
+layout(location = 0) out vec3 fragPos;
+layout(location = 1) out vec3 fragNormal;
 
-layout(location = 0) out float v_clipDistX;
-layout(location = 1) out float v_clipDistY;
-layout(location = 2) out float v_clipDistZ;
-layout(location = 3) out float v_clipDist;
-
-void main()
-{
-    gl_Position = projectionMatrix * viewMatrix * modelMatrix * vec4(vertexPosition, 1);
-
-    v_clipDistX = dot(clipPlaneX, viewMatrix * modelMatrix * vec4(vertexPosition, 1));
-    v_clipDistY = dot(clipPlaneY, viewMatrix * modelMatrix* vec4(vertexPosition, 1));
-    v_clipDistZ = dot(clipPlaneZ, viewMatrix * modelMatrix* vec4(vertexPosition, 1));
-    v_clipDist =  dot(clipPlane, viewMatrix * modelMatrix* vec4(vertexPosition, 1));
-
-    gl_ClipDistance[0] = v_clipDistX;
-    gl_ClipDistance[1] = v_clipDistY;
-    gl_ClipDistance[2] = v_clipDistZ;
-    gl_ClipDistance[3] = v_clipDist;
+void main() {
+    vec4 worldPos = model * vec4(inPosition, 1.0);
+    fragPos       = worldPos.xyz;
+    fragNormal    = mat3(normalMatrix) * inNormal;
+    gl_Position   = projection * view * worldPos;
 }

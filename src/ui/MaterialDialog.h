@@ -28,6 +28,8 @@ private:
     QLabel* m_diffuseLabel = nullptr;
     QLabel* m_specularLabel = nullptr;
     QDoubleSpinBox* m_shininessSpin = nullptr;
+    QDoubleSpinBox* m_metallicSpin = nullptr;
+    QDoubleSpinBox* m_roughnessSpin = nullptr;
     
     QPushButton* m_okButton = nullptr;
     QPushButton* m_cancelButton = nullptr;

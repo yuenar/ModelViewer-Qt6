@@ -19,11 +19,84 @@
 #include <assimp/Importer.hpp>
 #include <assimp/scene.h>
 #include <assimp/postprocess.h>
+#include <assimp/material.h>
 
 // Qt 头文件
 #include <QFileInfo>
 #include <QDebug>
+#include <QMatrix4x4>
 #include <QSet>
+#include <functional>
+
+namespace {
+
+/// @brief Assimp 矩阵（行主序）转 Qt 矩阵（构造函数按行主序）
+QMatrix4x4 toQtMatrix(const aiMatrix4x4& m) {
+  return QMatrix4x4(
+      m.a1, m.a2, m.a3, m.a4,
+      m.b1, m.b2, m.b3, m.b4,
+      m.c1, m.c2, m.c3, m.c4,
+      m.d1, m.d2, m.d3, m.d4);
+}
+
+/// @brief 读取材质漫反射颜色
+QVector3D materialDiffuse(const aiScene* scene, unsigned int materialIndex) {
+  if (!scene || materialIndex >= scene->mNumMaterials || !scene->mMaterials) {
+    return QVector3D(0.8f, 0.8f, 0.8f);
+  }
+  aiColor4D color;
+  if (aiGetMaterialColor(scene->mMaterials[materialIndex],
+                         AI_MATKEY_COLOR_DIFFUSE, &color) == AI_SUCCESS) {
+    return QVector3D(color.r, color.g, color.b);
+  }
+  return QVector3D(0.8f, 0.8f, 0.8f);
+}
+
+/// @brief 将 aiMesh 转成 CpuMesh，并应用节点累积变换
+CpuMesh buildMesh(const aiScene* scene, const aiMesh* aiMesh,
+                  const QMatrix4x4& transform, const QString& name) {
+  CpuMesh cpuMesh;
+  cpuMesh.name = name;
+  cpuMesh.baseColor = materialDiffuse(scene, aiMesh->mMaterialIndex);
+
+  const QMatrix4x4 normalMatrix = transform.inverted().transposed();
+
+  cpuMesh.vertices.reserve(aiMesh->mNumVertices);
+  for (unsigned int j = 0; j < aiMesh->mNumVertices; ++j) {
+    CpuMesh::Vertex vertex;
+    vertex.position = transform.map(QVector3D(
+        aiMesh->mVertices[j].x, aiMesh->mVertices[j].y, aiMesh->mVertices[j].z));
+
+    if (aiMesh->HasNormals()) {
+      vertex.normal = normalMatrix.mapVector(QVector3D(
+          aiMesh->mNormals[j].x, aiMesh->mNormals[j].y, aiMesh->mNormals[j].z)).normalized();
+    } else {
+      vertex.normal = QVector3D(0, 0, 1);
+    }
+
+    if (aiMesh->HasTextureCoords(0)) {
+      vertex.texCoord = QVector2D(aiMesh->mTextureCoords[0][j].x,
+                                  aiMesh->mTextureCoords[0][j].y);
+    }
+
+    cpuMesh.vertices.append(vertex);
+    cpuMesh.bbox.expand(vertex.position);
+  }
+
+  cpuMesh.indices.reserve(aiMesh->mNumFaces * 3);
+  for (unsigned int j = 0; j < aiMesh->mNumFaces; ++j) {
+    const aiFace& face = aiMesh->mFaces[j];
+    if (face.mNumIndices == 3) {
+      for (unsigned int k = 0; k < face.mNumIndices; ++k) {
+        cpuMesh.indices.append(face.mIndices[k]);
+      }
+    }
+  }
+
+  return cpuMesh;
+}
+
+}  // namespace
 
 QVector<CpuMesh> ModelLoader::loadCPU(const QString& filePath) {
   // 提取文件扩展名并转换为小写，用于格式检测
@@ -60,73 +133,43 @@ QVector<CpuMesh> ModelLoader::loadWithAssimp(const QString& path) {
   }
   
   QVector<CpuMesh> meshes;
-    
-  // 遍历场景中的所有网格
-  for (unsigned int i = 0; i < scene->mNumMeshes; ++i) {
-    const aiMesh* aiMesh = scene->mMeshes[i];
-    
-    CpuMesh cpuMesh;
-    
-    // 预分配顶点数组内存，提高性能
-    cpuMesh.vertices.reserve(aiMesh->mNumVertices);
-    
-    // 转换顶点数据
-    for (unsigned int j = 0; j < aiMesh->mNumVertices; ++j) {
-      CpuMesh::Vertex vertex;
-      
-      // 转换顶点位置坐标
-      vertex.position = QVector3D(
-          aiMesh->mVertices[j].x,
-          aiMesh->mVertices[j].y,
-          aiMesh->mVertices[j].z
-      );
-      
-      // 转换顶点法线
-      if (aiMesh->HasNormals()) {
-        vertex.normal = QVector3D(
-            aiMesh->mNormals[j].x,
-            aiMesh->mNormals[j].y,
-            aiMesh->mNormals[j].z
-        );
-      } else {
-        // 如果没有法线数据，使用默认法线
-        vertex.normal = QVector3D(0, 0, 1);
-      }
-      
-      // 转换纹理坐标（只使用第一组纹理坐标）
-      if (aiMesh->HasTextureCoords(0)) {
-        vertex.texCoord = QVector2D(
-            aiMesh->mTextureCoords[0][j].x,
-            aiMesh->mTextureCoords[0][j].y
-        );
-      } else {
-        // 如果没有纹理坐标，使用默认值
-        vertex.texCoord = QVector2D(0, 0);
-      }
-      
-      // 添加顶点到网格并更新包围盒
-      cpuMesh.vertices.append(vertex);
-      cpuMesh.bbox.expand(vertex.position);
-    }
-        
-    // 转换索引数据（三角形面片）
-    cpuMesh.indices.reserve(aiMesh->mNumFaces * 3);
-    for (unsigned int j = 0; j < aiMesh->mNumFaces; ++j) {
-      const aiFace& face = aiMesh->mFaces[j];
-      // 只处理三角形面片
-      if (face.mNumIndices == 3) {
-        for (unsigned int k = 0; k < face.mNumIndices; ++k) {
-          cpuMesh.indices.append(face.mIndices[k]);
+
+  // 递归遍历节点树，累积节点变换（修复多节点模型位置错误）
+  std::function<void(aiNode*, const QMatrix4x4&)> processNode =
+      [&](aiNode* node, const QMatrix4x4& parent) {
+        if (!node) {
+          return;
         }
-      }
-    }
-    
-    // 只有包含有效顶点和索引的网格才添加到结果中
-    if (!cpuMesh.vertices.isEmpty() && !cpuMesh.indices.isEmpty()) {
-      meshes.append(cpuMesh);
-    }
-  }
-  
+
+        const QMatrix4x4 global = parent * toQtMatrix(node->mTransformation);
+
+        for (unsigned int i = 0; i < node->mNumMeshes; ++i) {
+          const unsigned int meshIndex = node->mMeshes[i];
+          if (meshIndex >= scene->mNumMeshes) {
+            continue;
+          }
+          const aiMesh* aiMesh = scene->mMeshes[meshIndex];
+
+          QString meshName = aiMesh->mName.length > 0
+              ? QString::fromUtf8(aiMesh->mName.C_Str())
+              : QString::fromUtf8(node->mName.C_Str());
+          if (meshName.isEmpty()) {
+            meshName = QString("Mesh %1").arg(meshes.size());
+          }
+
+          CpuMesh cpuMesh = buildMesh(scene, aiMesh, global, meshName);
+          if (!cpuMesh.vertices.isEmpty() && !cpuMesh.indices.isEmpty()) {
+            meshes.append(cpuMesh);
+          }
+        }
+
+        for (unsigned int c = 0; c < node->mNumChildren; ++c) {
+          processNode(node->mChildren[c], global);
+        }
+      };
+
+  processNode(scene->mRootNode, QMatrix4x4());
+
   return meshes;
 }
 

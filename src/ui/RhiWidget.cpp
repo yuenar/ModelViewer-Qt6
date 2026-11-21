@@ -2,93 +2,341 @@
 #include "../renderer/RhiRenderer.h"
 #include "../loader/ModelLoader.h"
 #include "../math/BoundingBox.h"
-#include "../math/Camera.h"
+
 #include <QMouseEvent>
 #include <QWheelEvent>
-#include <QKeyEvent>
-#include <QFileDialog>
+#include <QImage>
+#include <QPainter>
+#include <QPixmap>
+#include <QResizeEvent>
+#include <QTimer>
+#include <QCursor>
+#include <QDebug>
 #include <QtMath>
+#include <limits>
+
+namespace {
+
+/// @brief 叠加在渲染控件上的 HUD 文字层（2D 文字渲染）
+class HudOverlay : public QWidget {
+ public:
+  explicit HudOverlay(RhiWidget* owner)
+      : QWidget(owner), m_owner(owner) {
+    setAttribute(Qt::WA_TransparentForMouseEvents);
+    setAttribute(Qt::WA_NoSystemBackground);
+    setAttribute(Qt::WA_TranslucentBackground);
+
+    auto* timer = new QTimer(this);
+    connect(timer, &QTimer::timeout, this, [this]() { update(); });
+    timer->start(500);
+  }
+
+ protected:
+  void paintEvent(QPaintEvent*) override {
+    if (!m_owner) {
+      return;
+    }
+
+    QPainter painter(this);
+    painter.setRenderHint(QPainter::Antialiasing, true);
+
+    painter.setPen(Qt::NoPen);
+    painter.setBrush(QColor(0, 0, 0, 120));
+    painter.drawRoundedRect(rect().adjusted(1, 1, -1, -1), 6, 6);
+
+    QFont font = painter.font();
+    font.setPointSizeF(9.0);
+    painter.setFont(font);
+    painter.setPen(QColor(235, 235, 235));
+
+    int y = 16;
+    const int lineHeight = 16;
+    const QRect area = rect().adjusted(10, 6, -10, -6);
+
+    painter.drawText(area.adjusted(0, y, 0, 0), Qt::AlignLeft | Qt::AlignTop,
+                     QString("Mode: %1  |  Style: %2")
+                         .arg(m_owner->renderModeName(), m_owner->displayStyleName()));
+    y += lineHeight;
+
+    painter.drawText(area.adjusted(0, y, 0, 0), Qt::AlignLeft | Qt::AlignTop,
+                     QString("Meshes: %1  |  FPS: %2")
+                         .arg(m_owner->meshCount())
+                         .arg(QString::number(m_owner->fps(), 'f', 1)));
+    y += lineHeight;
+
+    const int selected = m_owner->selectedMesh();
+    const QString selectedText = (selected >= 0)
+        ? QString("Selected: %1").arg(m_owner->meshName(selected))
+        : QString("Selected: -");
+    painter.drawText(area.adjusted(0, y, 0, 0), Qt::AlignLeft | Qt::AlignTop,
+                     selectedText);
+    y += lineHeight;
+
+    painter.drawText(area.adjusted(0, y, 0, 0), Qt::AlignLeft | Qt::AlignTop,
+                     QString("Axes: %1  |  Grid: %2  |  Multi-View: %3")
+                         .arg(m_owner->isAxisVisible() ? "on" : "off",
+                              m_owner->isGridVisible() ? "on" : "off",
+                              m_owner->isMultiView() ? "on" : "off"));
+  }
+
+ private:
+  RhiWidget* m_owner = nullptr;
+};
+
+}  // namespace
 
 RhiWidget::RhiWidget(QWidget* parent)
-    : QRhiWidget(parent)
-{
-    // 设置焦点策略，使 RhiWidget 能够接收键盘事件
+    : QRhiWidget(parent) {
     setFocusPolicy(Qt::StrongFocus);
+    m_fpsTimer.start();
+
+    m_hud = new HudOverlay(this);
+    m_hud->setGeometry(10, 10, 400, 84);
+    m_hud->raise();
+
+    updateCursorForTool();
 }
 
 RhiWidget::~RhiWidget() {
-    // 在 RHI 上下文仍然有效时释放渲染器资源
-    // 这确保所有 GPU 资源被正确释放，避免警告
-    if (m_renderer && rhi()) {
-        delete m_renderer;
-        m_renderer = nullptr;
-    }
-    
-    // 清理网格资源
+    releaseResources();
     qDeleteAll(m_meshes);
+    m_meshes.clear();
+}
+
+void RhiWidget::releaseResources() {
+    delete m_renderer;
+    m_renderer = nullptr;
+
+    for (RhiMesh* mesh : m_meshes) {
+        if (mesh) {
+            mesh->releaseGpu();
+        }
+    }
 }
 
 void RhiWidget::initialize(QRhiCommandBuffer* cb) {
-    qDebug() << "RhiWidget::initialize called";
     if (!m_renderer) {
         m_renderer = new RhiRenderer(rhi(), renderTarget());
         m_renderer->initialize(cb);
+        m_renderer->setBackgroundColors(m_bgTopColor, m_bgBotColor);
+        m_renderer->setNormalLength(qMax(m_sceneBbox.radius() * 0.15f, 0.05f));
+        m_renderer->setClipPlane(m_clipPlane);
+        m_renderer->setSelectedMesh(m_selectedMesh);
+        m_renderer->setRenderMode(m_renderMode);
+        m_renderer->setDisplayStyle(m_displayStyle);
+        m_renderer->setMultiView(m_multiView);
+        m_renderer->setAxisVisible(m_axisVisible);
+        m_renderer->setGridVisible(m_gridVisible);
     } else {
         m_renderer->setRenderTarget(renderTarget());
-        m_renderer->releaseAndRebuildPipelines();
+        m_renderer->rebuildPipelines();
     }
 }
 
 void RhiWidget::render(QRhiCommandBuffer* cb) {
-    qDebug() << "RhiWidget::render called, meshes:" << m_meshes.size();
     if (!m_renderer) {
-        qDebug() << "ERROR: m_renderer is null!";
         return;
     }
+
     const QSize pixelSize = renderTarget()->pixelSize();
-    qDebug() << "Render target size:" << pixelSize;
-    m_camera.setAspectRatio(float(pixelSize.width()) / float(pixelSize.height()));
-    
-    qDebug() << "Calling m_renderer->render...";
+    if (pixelSize.height() > 0) {
+        m_camera.setAspectRatio(float(pixelSize.width()) / float(pixelSize.height()));
+    }
+
     m_renderer->render(cb, m_meshes, m_camera, m_light, m_material);
-    qDebug() << "m_renderer->render completed";
+
+    ++m_frameCounter;
+    if (m_fpsTimer.elapsed() >= 1000) {
+        m_fps = float(m_frameCounter) * 1000.0f / float(m_fpsTimer.elapsed());
+        m_frameCounter = 0;
+        m_fpsTimer.restart();
+    }
+}
+
+void RhiWidget::resizeEvent(QResizeEvent* event) {
+    QRhiWidget::resizeEvent(event);
+    if (m_hud) {
+        m_hud->setGeometry(10, 10, qMin(400, width() - 20), 84);
+        m_hud->raise();
+    }
+}
+
+void RhiWidget::updateFps() {
+    ++m_frameCounter;
+    if (m_fpsTimer.elapsed() >= 1000) {
+        m_fps = float(m_frameCounter) * 1000.0f / float(m_fpsTimer.elapsed());
+        m_frameCounter = 0;
+        m_fpsTimer.restart();
+    }
 }
 
 void RhiWidget::loadModel(const QString& filePath) {
-    qDebug() << "loadModel called with path:" << filePath;
-    
     if (filePath.isEmpty()) {
-        qDebug() << "Empty path, not clearing meshes";
         return;
     }
-    
-    qDeleteAll(m_meshes);
+
+    ModelLoader loader;
+    const QVector<CpuMesh> cpuMeshes = loader.loadCPU(filePath);
+    setCPUMeshes(cpuMeshes, filePath);
+}
+
+void RhiWidget::setCPUMeshes(const QVector<CpuMesh>& meshes, const QString& label) {
+    for (RhiMesh* mesh : m_meshes) {
+        delete mesh;
+    }
     m_meshes.clear();
     m_sceneBbox = BoundingBox();
-    
-    ModelLoader loader;
-    const auto cpuMeshes = loader.loadCPU(filePath);
-    
-    for (const auto& cpuMesh : cpuMeshes) {
+    m_selectedMesh = -1;
+    m_sourceLabel = label;
+
+    int index = 0;
+    for (const CpuMesh& cpuMesh : meshes) {
         auto* mesh = new RhiMesh(nullptr, cpuMesh);
+        mesh->setName(cpuMesh.name.isEmpty()
+                          ? QString("Mesh %1").arg(index)
+                          : cpuMesh.name);
+        ++index;
         m_meshes.append(mesh);
         m_sceneBbox.expand(cpuMesh.bbox);
     }
+
+    if (!meshes.isEmpty()) {
+        m_material.diffuse = meshes.first().baseColor;
+    }
+
     m_camera.fitToView(m_sceneBbox);
-    
-    // 重置renderer的上传标志
+
+    if (m_renderer) {
+        m_renderer->resetMeshUploadFlag();
+        m_renderer->setNormalLength(qMax(m_sceneBbox.radius() * 0.15f, 0.05f));
+        m_clipPlane = QVector4D(-1.0f, 0.0f, 0.0f, m_sceneBbox.center().x());
+        m_renderer->setClipPlane(m_clipPlane);
+        m_renderer->setSelectedMesh(-1);
+    }
+
+    emit meshesChanged();
+    update();
+}
+
+QString RhiWidget::meshName(int index) const {
+    if (index < 0 || index >= m_meshes.size() || !m_meshes[index]) {
+        return QString();
+    }
+    return m_meshes[index]->name();
+}
+
+QVector<CpuMesh> RhiWidget::cpuMeshes() const {
+    QVector<CpuMesh> result;
+    result.reserve(m_meshes.size());
+    for (const RhiMesh* mesh : m_meshes) {
+        if (mesh) {
+            result.append(mesh->cpuMesh());
+        }
+    }
+    return result;
+}
+
+bool RhiWidget::isMeshVisible(int index) const {
+    return (index >= 0 && index < m_meshes.size() && m_meshes[index])
+               ? m_meshes[index]->isVisible()
+               : false;
+}
+
+void RhiWidget::setMeshVisible(int index, bool visible) {
+    if (index < 0 || index >= m_meshes.size() || !m_meshes[index]) {
+        return;
+    }
+    m_meshes[index]->setVisible(visible);
+    if (!visible && m_selectedMesh == index) {
+        m_selectedMesh = -1;
+        if (m_renderer) {
+            m_renderer->setSelectedMesh(-1);
+        }
+    }
+    emit meshesChanged();
+    update();
+}
+
+QMatrix4x4 RhiWidget::meshTransform(int index) const {
+    if (index < 0 || index >= m_meshes.size() || !m_meshes[index]) {
+        return QMatrix4x4();
+    }
+    return m_meshes[index]->transform();
+}
+
+void RhiWidget::setMeshTransform(int index, const QMatrix4x4& transform) {
+    if (index < 0 || index >= m_meshes.size() || !m_meshes[index]) {
+        return;
+    }
+
+    m_meshes[index]->setTransform(transform);
+
+    m_sceneBbox = BoundingBox();
+    for (const RhiMesh* mesh : m_meshes) {
+        if (mesh) {
+            m_sceneBbox.expand(mesh->cpuMesh().bbox);
+        }
+    }
+
     if (m_renderer) {
         m_renderer->resetMeshUploadFlag();
     }
-    
+    emit meshesChanged();
+    update();
+}
+
+void RhiWidget::resetMeshTransform(int index) {
+    setMeshTransform(index, QMatrix4x4());
+}
+
+void RhiWidget::showAllMeshes(bool visible) {
+    for (RhiMesh* mesh : m_meshes) {
+        if (mesh) {
+            mesh->setVisible(visible);
+        }
+    }
+    if (!visible) {
+        m_selectedMesh = -1;
+        if (m_renderer) {
+            m_renderer->setSelectedMesh(-1);
+        }
+    }
+    emit meshesChanged();
+    update();
+}
+
+void RhiWidget::swapMeshVisibility() {
+    for (RhiMesh* mesh : m_meshes) {
+        if (mesh) {
+            mesh->setVisible(!mesh->isVisible());
+        }
+    }
+    emit meshesChanged();
     update();
 }
 
 void RhiWidget::setRenderMode(int mode) {
+    m_renderMode = mode;
     if (m_renderer) {
         m_renderer->setRenderMode(mode);
-        update();
     }
+    update();
+}
+
+void RhiWidget::setDisplayStyle(int style) {
+    m_displayStyle = style;
+    if (m_renderer) {
+        m_renderer->setDisplayStyle(style);
+    }
+    update();
+}
+
+void RhiWidget::setMultiView(bool enabled) {
+    m_multiView = enabled;
+    if (m_renderer) {
+        m_renderer->setMultiView(enabled);
+    }
+    update();
 }
 
 void RhiWidget::setMaterial(const Material& mat) {
@@ -96,45 +344,331 @@ void RhiWidget::setMaterial(const Material& mat) {
     update();
 }
 
+void RhiWidget::applyMaterialPreset(const QString& name) {
+    struct Preset {
+        const char* name;
+        QVector3D ambient;
+        QVector3D diffuse;
+        QVector3D specular;
+        float shininess;
+        float metallic;
+        float roughness;
+    };
+
+    static const Preset presets[] = {
+        {"Brass",     {0.33f, 0.22f, 0.03f}, {0.78f, 0.57f, 0.11f}, {0.99f, 0.94f, 0.81f}, 27.9f, 1.0f, 0.25f},
+        {"Bronze",    {0.21f, 0.13f, 0.05f}, {0.71f, 0.43f, 0.18f}, {0.39f, 0.27f, 0.17f}, 25.6f, 1.0f, 0.35f},
+        {"Chrome",    {0.25f, 0.25f, 0.25f}, {0.55f, 0.55f, 0.55f}, {0.77f, 0.77f, 0.77f}, 76.8f, 1.0f, 0.12f},
+        {"Copper",    {0.19f, 0.07f, 0.02f}, {0.70f, 0.27f, 0.08f}, {0.26f, 0.14f, 0.09f}, 12.8f, 1.0f, 0.30f},
+        {"Emerald",   {0.02f, 0.17f, 0.07f}, {0.08f, 0.62f, 0.32f}, {0.63f, 0.73f, 0.66f}, 76.8f, 0.0f, 0.20f},
+        {"Gold",      {0.25f, 0.20f, 0.04f}, {0.75f, 0.61f, 0.23f}, {0.63f, 0.56f, 0.37f}, 51.2f, 1.0f, 0.18f},
+        {"Jade",      {0.05f, 0.13f, 0.09f}, {0.32f, 0.61f, 0.45f}, {0.30f, 0.34f, 0.30f}, 12.8f, 0.0f, 0.35f},
+        {"Obsidian",  {0.05f, 0.05f, 0.05f}, {0.19f, 0.19f, 0.19f}, {0.30f, 0.30f, 0.30f}, 38.4f, 0.0f, 0.15f},
+        {"Pearl",     {0.25f, 0.23f, 0.21f}, {0.83f, 0.79f, 0.75f}, {0.30f, 0.30f, 0.28f}, 11.3f, 0.0f, 0.40f},
+        {"Ruby",      {0.17f, 0.02f, 0.02f}, {0.61f, 0.07f, 0.07f}, {0.73f, 0.63f, 0.63f}, 76.8f, 0.0f, 0.15f},
+        {"Silver",    {0.19f, 0.19f, 0.19f}, {0.51f, 0.51f, 0.51f}, {0.75f, 0.75f, 0.75f}, 51.2f, 1.0f, 0.20f},
+        {"Turquoise", {0.10f, 0.19f, 0.20f}, {0.25f, 0.76f, 0.75f}, {0.30f, 0.31f, 0.31f}, 12.8f, 0.0f, 0.35f},
+    };
+
+    for (const Preset& preset : presets) {
+        if (name.compare(QString::fromLatin1(preset.name), Qt::CaseInsensitive) == 0) {
+            m_material.ambient = preset.ambient;
+            m_material.diffuse = preset.diffuse;
+            m_material.specular = preset.specular;
+            m_material.shininess = preset.shininess;
+            m_material.metallic = preset.metallic;
+            m_material.roughness = preset.roughness;
+            update();
+            return;
+        }
+    }
+}
+
 void RhiWidget::setLight(const Light& light) {
     m_light = light;
     update();
 }
 
-void RhiWidget::setBackgroundColors(const QVector3D& topColor, const QVector3D& botColor) {
+void RhiWidget::setBackgroundColors(const QVector3D& topColor,
+                                    const QVector3D& botColor) {
+    m_bgTopColor = topColor;
+    m_bgBotColor = botColor;
     if (m_renderer) {
         m_renderer->setBackgroundColors(topColor, botColor);
-        update();
     }
+    update();
 }
 
 void RhiWidget::fitToView() {
-    if (!m_meshes.isEmpty()) {
+    if (!m_sceneBbox.isEmpty()) {
         m_camera.fitToView(m_sceneBbox);
         update();
     }
 }
 
+void RhiWidget::applyViewPreset(int preset) {
+    if (m_sceneBbox.isEmpty()) {
+        return;
+    }
+    m_camera.setViewPreset(preset, m_sceneBbox);
+    update();
+}
+
+void RhiWidget::setProjectionType(ProjectionType type) {
+    m_camera.setProjectionType(type);
+    emit projectionChanged(isOrthographic());
+    update();
+}
+
+void RhiWidget::toggleProjection() {
+    m_camera.setProjectionType(m_camera.projectionType() == ProjectionType::Perspective
+                                   ? ProjectionType::Orthographic
+                                   : ProjectionType::Perspective);
+    emit projectionChanged(isOrthographic());
+    update();
+}
+
+bool RhiWidget::isOrthographic() const {
+    return m_camera.projectionType() == ProjectionType::Orthographic;
+}
+
+void RhiWidget::setNormalLength(float length) {
+    if (m_renderer) {
+        m_renderer->setNormalLength(length);
+    }
+    update();
+}
+
+void RhiWidget::setClippingPlane(const QVector4D& plane) {
+    m_clipPlane = plane;
+    if (m_renderer) {
+        m_renderer->setClipPlane(plane);
+    }
+    update();
+}
+
+void RhiWidget::selectMesh(int index) {
+    m_selectedMesh = index;
+    if (m_renderer) {
+        m_renderer->setSelectedMesh(index);
+    }
+    update();
+}
+
+void RhiWidget::setAxisVisible(bool visible) {
+    m_axisVisible = visible;
+    if (m_renderer) {
+        m_renderer->setAxisVisible(visible);
+    }
+    update();
+}
+
+void RhiWidget::setGridVisible(bool visible) {
+    m_gridVisible = visible;
+    if (m_renderer) {
+        m_renderer->setGridVisible(visible);
+    }
+    update();
+}
+
+void RhiWidget::setToolMode(ToolMode mode) {
+    m_toolMode = mode;
+    updateCursorForTool();
+}
+
+void RhiWidget::updateCursorForTool() {
+    QString resource;
+    Qt::CursorShape fallback = Qt::ArrowCursor;
+
+    switch (m_toolMode) {
+        case ToolMode::Rotate:
+            resource = ":/res/rotatecursor.png";
+            fallback = Qt::OpenHandCursor;
+            break;
+        case ToolMode::Pan:
+            resource = ":/res/pancursor.png";
+            fallback = Qt::SizeAllCursor;
+            break;
+        case ToolMode::Zoom:
+            resource = ":/res/zoomcursor.png";
+            fallback = Qt::PointingHandCursor;
+            break;
+        case ToolMode::Select:
+            fallback = Qt::ArrowCursor;
+            break;
+    }
+
+    if (!resource.isEmpty()) {
+        const QPixmap pixmap(resource);
+        if (!pixmap.isNull()) {
+            setCursor(QCursor(pixmap, pixmap.width() / 2, pixmap.height() / 2));
+            return;
+        }
+    }
+    setCursor(fallback);
+}
+
+QString RhiWidget::renderModeName() const {
+    static const char* names[] = {
+        "Phong", "Wireframe", "Vertex Normals", "Face Normals",
+        "Vertex Normals Visualization", "Flat Shading", "PBR",
+        "Shadow Mapping", "Skybox", "Selection", "Clipping Plane",
+        "Split Screen",
+    };
+    if (m_renderMode >= 0 && m_renderMode < 12) {
+        return QString::fromLatin1(names[m_renderMode]);
+    }
+    return "Unknown";
+}
+
+QString RhiWidget::displayStyleName() const {
+    static const char* names[] = {"Shaded", "Wireframe", "Wire-Shaded", "Realistic"};
+    if (m_displayStyle >= 0 && m_displayStyle < 4) {
+        return QString::fromLatin1(names[m_displayStyle]);
+    }
+    return "Unknown";
+}
+
+QVector3D RhiWidget::unproject(const QPoint& pos, float ndcZ) const {
+    const QSize viewport = size();
+    if (viewport.width() <= 0 || viewport.height() <= 0) {
+        return QVector3D();
+    }
+
+    const float ndcX = 2.0f * float(pos.x()) / float(viewport.width()) - 1.0f;
+    const float ndcY = 1.0f - 2.0f * float(pos.y()) / float(viewport.height());
+
+    const QMatrix4x4 proj = m_camera.projectionMatrix();
+    const QMatrix4x4 view = m_camera.viewMatrix();
+    const QMatrix4x4 inv = (proj * view).inverted();
+
+    QVector4D p = inv * QVector4D(ndcX, ndcY, ndcZ, 1.0f);
+    if (qAbs(p.w()) < 1e-6f) {
+        return QVector3D();
+    }
+    return p.toVector3D() / p.w();
+}
+
+int RhiWidget::pickMesh(const QPoint& pos) const {
+    if (m_meshes.isEmpty()) {
+        return -1;
+    }
+
+    const QVector3D nearPoint = unproject(pos, -1.0f);
+    const QVector3D farPoint = unproject(pos, 1.0f);
+    const QVector3D direction = (farPoint - nearPoint).normalized();
+    if (direction.lengthSquared() < 1e-8f) {
+        return -1;
+    }
+
+    int bestIndex = -1;
+    float bestT = std::numeric_limits<float>::max();
+
+    for (int meshIndex = 0; meshIndex < m_meshes.size(); ++meshIndex) {
+        const RhiMesh* mesh = m_meshes[meshIndex];
+        if (!mesh || !mesh->isVisible()) {
+            continue;
+        }
+        const CpuMesh& cpu = mesh->cpuMesh();
+        if (cpu.bbox.isEmpty()) {
+            continue;
+        }
+
+        const int triangleCount = cpu.indices.size() / 3;
+        for (int tri = 0; tri < triangleCount; ++tri) {
+            const quint32 i0 = cpu.indices[tri * 3 + 0];
+            const quint32 i1 = cpu.indices[tri * 3 + 1];
+            const quint32 i2 = cpu.indices[tri * 3 + 2];
+            if (i0 >= static_cast<quint32>(cpu.vertices.size()) ||
+                i1 >= static_cast<quint32>(cpu.vertices.size()) ||
+                i2 >= static_cast<quint32>(cpu.vertices.size())) {
+                continue;
+            }
+
+            const QVector3D& v0 = cpu.vertices[i0].position;
+            const QVector3D& v1 = cpu.vertices[i1].position;
+            const QVector3D& v2 = cpu.vertices[i2].position;
+
+            const QVector3D edge1 = v1 - v0;
+            const QVector3D edge2 = v2 - v0;
+            const QVector3D h = QVector3D::crossProduct(direction, edge2);
+            const float a = QVector3D::dotProduct(edge1, h);
+            if (qAbs(a) < 1e-7f) {
+                continue;
+            }
+            const float invA = 1.0f / a;
+            const QVector3D s = nearPoint - v0;
+            const float u = invA * QVector3D::dotProduct(s, h);
+            if (u < 0.0f || u > 1.0f) {
+                continue;
+            }
+            const QVector3D q = QVector3D::crossProduct(s, edge1);
+            const float v = invA * QVector3D::dotProduct(direction, q);
+            if (v < 0.0f || u + v > 1.0f) {
+                continue;
+            }
+            const float t = invA * QVector3D::dotProduct(edge2, q);
+            if (t > 1e-4f && t < bestT) {
+                bestT = t;
+                bestIndex = meshIndex;
+            }
+        }
+    }
+
+    return bestIndex;
+}
+
 void RhiWidget::mousePressEvent(QMouseEvent* e) {
     m_lastMousePos = e->pos();
+    m_pressPos = e->pos();
+    m_dragged = false;
     m_activeButton = e->button();
-    if (e->button() == Qt::LeftButton)
+    if (e->button() == Qt::LeftButton) {
         m_camera.beginRotate(e->pos());
+    }
 }
 
 void RhiWidget::mouseMoveEvent(QMouseEvent* e) {
+    if ((e->pos() - m_pressPos).manhattanLength() > 3) {
+        m_dragged = true;
+    }
+
+    const QPoint delta = e->pos() - m_lastMousePos;
+
     if (m_activeButton == Qt::LeftButton) {
-        m_camera.rotate(m_lastMousePos, e->pos(), size());
-    } else if (m_activeButton == Qt::MiddleButton) {
-        const QPoint delta = e->pos() - m_lastMousePos;
+        switch (m_toolMode) {
+            case ToolMode::Pan:
+                m_camera.pan(delta);
+                break;
+            case ToolMode::Zoom:
+                m_camera.zoom(-float(delta.y()) * 0.01f);
+                break;
+            case ToolMode::Rotate:
+            case ToolMode::Select:
+            default:
+                m_camera.rotate(m_lastMousePos, e->pos(), size());
+                break;
+        }
+    } else if (m_activeButton == Qt::MiddleButton ||
+               m_activeButton == Qt::RightButton) {
         m_camera.pan(delta);
     }
+
     m_lastMousePos = e->pos();
     update();
 }
 
-void RhiWidget::mouseReleaseEvent(QMouseEvent*) {
+void RhiWidget::mouseReleaseEvent(QMouseEvent* e) {
+    if (e->button() == Qt::LeftButton && !m_dragged && m_renderer &&
+        (m_renderMode == static_cast<int>(RenderMode::Selection) ||
+         m_toolMode == ToolMode::Select)) {
+        m_selectedMesh = pickMesh(e->pos());
+        m_renderer->setSelectedMesh(m_selectedMesh);
+        emit meshesChanged();
+        update();
+    }
     m_activeButton = Qt::NoButton;
+    m_dragged = false;
 }
 
 void RhiWidget::wheelEvent(QWheelEvent* e) {
@@ -143,260 +677,116 @@ void RhiWidget::wheelEvent(QWheelEvent* e) {
 }
 
 void RhiWidget::saveScreenshot(const QString& filePath) {
-    QImage image = grabFramebuffer();
+    const QImage image = grabFramebuffer();
     if (image.isNull()) {
         qWarning() << "Failed to grab framebuffer";
         return;
     }
-    
     if (!image.save(filePath)) {
         qWarning() << "Failed to save screenshot to" << filePath;
-    } else {
-        qDebug() << "Screenshot saved to" << filePath;
     }
 }
 
-void RhiWidget::toggleProjection() {
-    // 切换投影类型
-    static ProjectionType currentType = ProjectionType::Perspective;
-    currentType = (currentType == ProjectionType::Perspective) 
-                  ? ProjectionType::Orthographic 
-                  : ProjectionType::Perspective;
-    m_camera.setProjectionType(currentType);
-    update();
-}
-
-void RhiWidget::keyPressEvent(QKeyEvent* e) {
-    qDebug() << "keyPressEvent received, key:" << e->key() << "text:" << e->text();
-    
-    if (e->isAutoRepeat()) {
-        e->ignore();
-        return;
-    }
-    
-    switch (e->key()) {
-        case Qt::Key_F:
-            // F：聚焦视图
-            qDebug() << "F key pressed - fitToView";
-            fitToView();
-            e->accept();
-            break;
-            
-        case Qt::Key_Space:
-            // Space：重置视图
-            qDebug() << "Space key pressed - reset camera";
-            m_camera.reset();
-            update();
-            e->accept();
-            break;
-            
-        case Qt::Key_W:
-            // W：切换线框模式
-            qDebug() << "W key pressed - toggle wireframe";
-            if (m_renderer) {
-                static int mode = 0;
-                mode = (mode == 1) ? 0 : 1;
-                setRenderMode(mode);
-            }
-            e->accept();
-            break;
-            
-        case Qt::Key_N:
-            // N：显示法线
-            qDebug() << "N key pressed - toggle normals";
-            if (m_renderer) {
-                static int mode = 0;
-                mode = (mode == 2) ? 0 : 2;
-                setRenderMode(mode);
-            }
-            e->accept();
-            break;
-            
-        case Qt::Key_L:
-            // L：切换光照（在 Phong 和 Wireframe 之间切换）
-            qDebug() << "L key pressed - toggle lighting";
-            if (m_renderer) {
-                static int mode = 0;
-                mode = (mode == 0) ? 1 : 0;
-                setRenderMode(mode);
-            }
-            e->accept();
-            break;
-            
-        case Qt::Key_S:
-            // S：切换阴影（切换到阴影映射模式）
-            qDebug() << "S key pressed - toggle shadow mapping";
-            if (m_renderer) {
-                static int mode = 0;
-                mode = (mode == 7) ? 0 : 7;
-                setRenderMode(mode);
-            }
-            e->accept();
-            break;
-            
-        case Qt::Key_P:
-            // P：切换投影
-            qDebug() << "P key pressed - toggle projection";
-            toggleProjection();
-            e->accept();
-            break;
-            
-        case Qt::Key_F11:
-            // F11：全屏模式
-            qDebug() << "F11 key pressed - toggle fullscreen";
-            if (window()->isFullScreen()) {
-                window()->showNormal();
-            } else {
-                window()->showFullScreen();
-            }
-            e->accept();
-            break;
-            
-        case Qt::Key_1:
-        case Qt::Key_2:
-        case Qt::Key_3:
-        case Qt::Key_4:
-        case Qt::Key_5:
-        case Qt::Key_6:
-        case Qt::Key_7: {
-            // 数字快捷键 1-7：视图预设
-            int preset = e->key() - Qt::Key_1;
-            qDebug() << "Number key pressed - view preset" << preset;
-            
-            if (m_meshes.isEmpty()) {
-                qDebug() << "No model loaded, cannot apply view preset";
-                e->accept();
-                break;
-            }
-            
-            // 获取模型的包围盒信息
-            QVector3D center = m_sceneBbox.center();
-            float radius = m_sceneBbox.radius();
-            
-            // 根据包围盒大小计算合适的距离
-            float distance = radius / qSin(qDegreesToRadians(22.5f)); // 45度视场角的一半
-            
-            // 设置摄像机方向和目标
-            QVector3D direction;
-            QVector3D up(0, 1, 0);
-            
-            switch (preset) {
-                case 0: // 前视图 - 沿 Z 轴正方向看
-                    direction = QVector3D(0, 0, 1);
-                    up = QVector3D(0, 1, 0);
-                    break;
-                case 1: // 后视图 - 沿 Z 轴负方向看
-                    direction = QVector3D(0, 0, -1);
-                    up = QVector3D(0, 1, 0);
-                    break;
-                case 2: // 左视图 - 沿 X 轴负方向看
-                    direction = QVector3D(-1, 0, 0);
-                    up = QVector3D(0, 1, 0);
-                    break;
-                case 3: // 右视图 - 沿 X 轴正方向看
-                    direction = QVector3D(1, 0, 0);
-                    up = QVector3D(0, 1, 0);
-                    break;
-                case 4: // 顶视图 - 从上往下看，沿 Y 轴负方向
-                    direction = QVector3D(0, -1, 0);
-                    up = QVector3D(1, 0, 0);  // 使用 X 轴作为上向量
-                    break;
-                case 5: // 底视图 - 从下往上看，沿 Y 轴正方向
-                    direction = QVector3D(0, 1, 0);
-                    up = QVector3D(1, 0, 0);  // 使用 X 轴作为上向量
-                    break;
-                case 6: // 等轴测视图
-                    direction = QVector3D(1, 1, 1).normalized();
-                    up = QVector3D(0, 1, 0);
-                    break;
-                default:
-                    direction = QVector3D(0, 0, 1);
-                    up = QVector3D(0, 1, 0);
-            }
-            
-            // 设置摄像机位置：从目标点沿着方向的反方向移动距离
-            m_camera.setTarget(center);
-            m_camera.setPosition(center - direction * distance);
-            m_camera.setUp(up);
-            
-            update();
-            e->accept();
-            break;
-        }
-            
-        default:
-            QRhiWidget::keyPressEvent(e);
-            break;
-    }
-}
-
-
-bool RhiWidget::saveScreenshotEx(const QString& filePath, const QString& format, int quality) {
-    QImage image = grabFramebuffer();
+bool RhiWidget::saveScreenshotEx(const QString& filePath, const QString& format,
+                                 int quality) {
+    const QImage image = grabFramebuffer();
     if (image.isNull()) {
         qWarning() << "Failed to grab framebuffer";
         return false;
     }
-    
+
     bool success = false;
-    if (format.toLower() == "jpg" || format.toLower() == "jpeg") {
+    if (format.compare("jpg", Qt::CaseInsensitive) == 0 ||
+        format.compare("jpeg", Qt::CaseInsensitive) == 0) {
         success = image.save(filePath, "JPEG", quality);
     } else {
-        success = image.save(filePath, format.toUpper().toStdString().c_str());
+        const QByteArray fmt = format.toUpper().toLatin1();
+        success = image.save(filePath, fmt.constData(), quality);
     }
-    
+
     if (!success) {
         qWarning() << "Failed to save screenshot to" << filePath;
-    } else {
-        qDebug() << "Screenshot saved to" << filePath << "with format" << format;
     }
-    
     return success;
 }
 
+bool RhiWidget::saveScreenshotScaled(const QString& filePath, int width, int height) {
+    const QImage image = grabFramebuffer();
+    if (image.isNull()) {
+        qWarning() << "Failed to grab framebuffer";
+        return false;
+    }
+
+    const QImage scaled = image.scaled(qMax(1, width), qMax(1, height),
+                                       Qt::KeepAspectRatio, Qt::SmoothTransformation);
+    return scaled.save(filePath);
+}
 
 QString RhiWidget::getModelStatistics() const {
     if (m_meshes.isEmpty()) {
         return "No model loaded";
     }
-    
-    uint32_t totalVertices = 0;
-    uint32_t totalIndices = 0;
-    
-    for (const auto* mesh : m_meshes) {
+
+    quint64 totalVertices = 0;
+    quint64 totalIndices = 0;
+    for (const RhiMesh* mesh : m_meshes) {
         if (mesh) {
             totalVertices += mesh->vertexCount();
             totalIndices += mesh->indexCount();
         }
     }
-    
-    uint32_t triangles = totalIndices / 3;
-    
-    QVector3D minPt = m_sceneBbox.min();
-    QVector3D maxPt = m_sceneBbox.max();
-    QVector3D sizePt = maxPt - minPt;
-    
+
+    const QVector3D minPt = m_sceneBbox.min();
+    const QVector3D maxPt = m_sceneBbox.max();
+    const QVector3D sizePt = m_sceneBbox.size();
+
     QString stats = QString(
         "Model Statistics:\n"
-        "Meshes: %1\n"
-        "Vertices: %2\n"
-        "Triangles: %3\n"
+        "Source: %1\n"
+        "Meshes: %2\n"
+        "Vertices: %3\n"
+        "Triangles: %4\n"
         "Bounding Box:\n"
-        "  Min: (%4, %5, %6)\n"
-        "  Max: (%7, %8, %9)\n"
-        "  Size: (%10, %11, %12)"
-    ).arg(m_meshes.size())
-     .arg(totalVertices)
-     .arg(triangles)
-     .arg(minPt.x(), 0, 'f', 2)
-     .arg(minPt.y(), 0, 'f', 2)
-     .arg(minPt.z(), 0, 'f', 2)
-     .arg(maxPt.x(), 0, 'f', 2)
-     .arg(maxPt.y(), 0, 'f', 2)
-     .arg(maxPt.z(), 0, 'f', 2)
-     .arg(sizePt.x(), 0, 'f', 2)
-     .arg(sizePt.y(), 0, 'f', 2)
-     .arg(sizePt.z(), 0, 'f', 2);
-    
+        "  Min: (%5, %6, %7)\n"
+        "  Max: (%8, %9, %10)\n"
+        "  Size: (%11, %12, %13)\n"
+        "\n"
+        "Material:\n"
+        "  Ambient: (%14, %15, %16)\n"
+        "  Diffuse: (%17, %18, %19)\n"
+        "  Specular: (%20, %21, %22)\n"
+        "  Shininess: %23\n"
+        "  Metallic: %24\n"
+        "  Roughness: %25\n"
+        "\n"
+        "Light:\n"
+        "  Position: (%26, %27, %28)\n"
+        "  Color: (%29, %30, %31)")
+        .arg(m_sourceLabel)
+        .arg(m_meshes.size())
+        .arg(totalVertices)
+        .arg(totalIndices / 3)
+        .arg(minPt.x(), 0, 'f', 2).arg(minPt.y(), 0, 'f', 2).arg(minPt.z(), 0, 'f', 2)
+        .arg(maxPt.x(), 0, 'f', 2).arg(maxPt.y(), 0, 'f', 2).arg(maxPt.z(), 0, 'f', 2)
+        .arg(sizePt.x(), 0, 'f', 2).arg(sizePt.y(), 0, 'f', 2).arg(sizePt.z(), 0, 'f', 2)
+        .arg(m_material.ambient.x(), 0, 'f', 2)
+        .arg(m_material.ambient.y(), 0, 'f', 2)
+        .arg(m_material.ambient.z(), 0, 'f', 2)
+        .arg(m_material.diffuse.x(), 0, 'f', 2)
+        .arg(m_material.diffuse.y(), 0, 'f', 2)
+        .arg(m_material.diffuse.z(), 0, 'f', 2)
+        .arg(m_material.specular.x(), 0, 'f', 2)
+        .arg(m_material.specular.y(), 0, 'f', 2)
+        .arg(m_material.specular.z(), 0, 'f', 2)
+        .arg(m_material.shininess, 0, 'f', 1)
+        .arg(m_material.metallic, 0, 'f', 2)
+        .arg(m_material.roughness, 0, 'f', 2)
+        .arg(m_light.position.x(), 0, 'f', 2)
+        .arg(m_light.position.y(), 0, 'f', 2)
+        .arg(m_light.position.z(), 0, 'f', 2)
+        .arg(m_light.color.x(), 0, 'f', 2)
+        .arg(m_light.color.y(), 0, 'f', 2)
+        .arg(m_light.color.z(), 0, 'f', 2);
+
     return stats;
 }

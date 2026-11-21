@@ -16,134 +16,109 @@
 #define MODELVIEWER_SRC_RENDERER_RHIMESH_H_
 
 #include <rhi/qrhi.h>
+#include <QMatrix4x4>
+#include <QString>
 #include "../core/CpuMesh.h"
 
 /// @brief GPU 端网格数据管理类
-/// 
+///
 /// 该类负责管理 GPU 上的网格数据，包括顶点缓冲区和索引缓冲区。
 /// 将 CPU 端的 CpuMesh 数据上传到 GPU，并提供渲染所需的缓冲区访问接口。
-/// 
-/// 主要功能：
-/// - 创建和管理 GPU 顶点缓冲区（VBO）
-/// - 创建和管理 GPU 索引缓冲区（IBO/EBO）
-/// - 数据上传和同步
-/// - 资源生命周期管理
-/// 
-/// 使用流程：
-/// 1. 从 CpuMesh 创建 RhiMesh
-/// 2. 调用 upload() 将数据上传到 GPU
-/// 3. 在渲染时获取缓冲区进行绘制
-/// 
-/// 使用示例：
-/// @code
-/// RhiMesh gpuMesh(rhi, cpuMesh);
-/// gpuMesh.upload(&resourceBatch);
-/// 
-/// // 渲染时使用
-/// QRhiBuffer* vbuf = gpuMesh.vertexBuffer();
-/// QRhiBuffer* ibuf = gpuMesh.indexBuffer();
-/// int indexCount = gpuMesh.indexCount();
-/// @endcode
+///
+/// 除三角面数据外，还预先在 CPU 端生成两类辅助几何：
+/// - 去重后的线框线段索引（用于 Wireframe 模式）
+/// - 法线线段顶点（起点 + 方向，用于顶点/面法线可视化）
 class RhiMesh {
  public:
+  /// @brief 法线线段顶点
+  ///
+  /// direction 为 0 表示线段起点，为归一化法线表示线段终点；
+  /// 着色器按 NormalUBO.length 伸缩，避免重新上传数据。
+  struct LineVertex {
+    QVector3D position;
+    QVector3D direction;
+  };
+
   /// @brief 构造函数，从 CPU 网格数据创建 GPU 网格
-  /// 
-  /// 根据提供的 CpuMesh 数据创建相应的 GPU 缓冲区。
-  /// 构造函数会创建缓冲区对象，但不会立即上传数据。
-  /// 
+  ///
   /// @param[in] rhi RHI 设备指针，用于创建 GPU 资源
   /// @param[in] cpu CPU 端的网格数据，包含顶点和索引信息
-  /// 
-  /// @note 数据上传需要显式调用 upload() 方法
-  /// @note rhi 指针必须在 RhiMesh 生命周期内有效
   RhiMesh(QRhi* rhi, const CpuMesh& cpu);
-  
+
   /// @brief 析构函数，清理 GPU 资源
-  /// 
-  /// 自动释放创建的顶点缓冲区和索引缓冲区。
-  /// 如果缓冲区仍被 GPU 使用，会安全地延迟释放。
   ~RhiMesh();
-  
+
   /// @brief 设置 RHI 设备指针
-  /// 
-  /// 在 RHI 设备重新创建或更改时使用。
-  /// 
-  /// @param[in] rhi 新的 RHI 设备指针
-  /// 
-  /// @note 更换 RHI 后需要重新调用 upload() 上传数据
   void setRhi(QRhi* rhi) { m_rhi = rhi; }
-  
+
   /// @brief 将 CPU 数据上传到 GPU
-  /// 
-  /// 将 CpuMesh 中的顶点和索引数据上传到 GPU 缓冲区。
-  /// 使用资源更新批次进行高效的批量上传。
-  /// 
+  ///
   /// @param[in] batch 资源更新批次，用于批量提交更新操作
-  /// 
-  /// @note 必须在渲染线程中调用
-  /// @note 每次数据修改后都需要重新上传
   void upload(QRhiResourceUpdateBatch* batch);
-  
-  /// @brief 获取顶点缓冲区
-  /// 
-  /// @return QRhiPtr* GPU 顶点缓冲区指针
-  /// 
-  /// @note 返回的缓冲区包含位置、法线、纹理坐标等顶点属性
+
+  /// @brief 释放 GPU 资源（保留 CPU 数据以便重新上传）
+  void releaseGpu();
+
   QRhiBuffer* vertexBuffer() const { return m_vbuf; }
-  
-  /// @brief 获取索引缓冲区
-  /// 
-  /// @return QRhiPtr* GPU 索引缓冲区指针
-  /// 
-  /// @note 索引类型通常为 32 位无符号整数
   QRhiBuffer* indexBuffer() const { return m_ibuf; }
-  
-  /// @brief 获取索引数量
-  /// 
-  /// @return int 索引缓冲区中的索引数量
-  /// 
-  /// @note 用于绘制调用：glDrawElements(GL_TRIANGLES, count, ...)
   int indexCount() const { return m_indexCount; }
-  
-  /// @brief 获取顶点数量
-  /// 
-  /// @return int 顶点缓冲区中的顶点数量
   int vertexCount() const { return m_cpuData.vertices.size(); }
 
+  /// @brief 线框线段索引缓冲（Lines 拓扑，索引对）
+  QRhiBuffer* lineIndexBuffer() const { return m_lineIbuf; }
+  int lineIndexCount() const { return m_lineIndexCount; }
+
+  /// @brief 顶点法线线段（Lines 拓扑，非索引绘制）
+  QRhiBuffer* vertexNormalBuffer() const { return m_vnormalVbuf; }
+  int vertexNormalVertexCount() const { return m_vertexNormalLines.size(); }
+
+  /// @brief 面法线线段（Lines 拓扑，非索引绘制）
+  QRhiBuffer* faceNormalBuffer() const { return m_fnormalVbuf; }
+  int faceNormalVertexCount() const { return m_faceNormalLines.size(); }
+
+  /// @brief 访问 CPU 端数据（用于拾取、统计等）
+  const CpuMesh& cpuMesh() const { return m_cpuData; }
+
+  // ── 对象属性 ─────────────────────────────────────────────
+  void setName(const QString& name) { m_name = name; }
+  QString name() const { return m_name; }
+
+  void setVisible(bool visible) { m_visible = visible; }
+  bool isVisible() const { return m_visible; }
+
+  /// @brief 设置对象变换（在基础几何上重新烘焙并重建线段数据）
+  ///
+  /// 变换直接作用于 CPU 顶点/法线并重新上传，因此拾取、包围盒、
+  /// 阴影等所有下游逻辑都会自动跟随。
+  void setTransform(const QMatrix4x4& transform);
+  QMatrix4x4 transform() const { return m_transform; }
+  void resetTransform() { setTransform(QMatrix4x4()); }
+
  private:
-  /// @brief RHI 设备指针
-  /// 
-  /// 用于创建和管理 GPU 资源。
-  /// 所有 GPU 操作都通过此接口进行。
+  void buildLineIndices();
+  void buildNormalLines();
+  void rebuildDerivedData();
+
   QRhi* m_rhi = nullptr;
-  
-  /// @brief GPU 顶点缓冲区
-  /// 
-  /// 存储网格的顶点数据，包括：
-  /// - 位置坐标（3 个 float）
-  /// - 法线向量（3 个 float）
-  /// - 纹理坐标（2 个 float）
-  /// 
-  /// 缓冲区格式由顶点布局定义。
   QRhiBuffer* m_vbuf = nullptr;
-  
-  /// @brief GPU 索引缓冲区
-  /// 
-  /// 存储网格的索引数据，定义三角形的拓扑结构。
-  /// 每三个索引构成一个三角形。
   QRhiBuffer* m_ibuf = nullptr;
-  
-  /// @brief CPU 端网格数据备份
-  /// 
-  /// 保存原始的 CPU 数据，用于重新上传或数据修改。
-  /// 在需要重新创建 GPU 资源时会用到。
-  CpuMesh m_cpuData;
-  
-  /// @brief 索引数量
-  /// 
-  /// 缓存索引缓冲区中的索引数量，
-  /// 避免每次都从缓冲区获取。
+  QRhiBuffer* m_lineIbuf = nullptr;
+  QRhiBuffer* m_vnormalVbuf = nullptr;
+  QRhiBuffer* m_fnormalVbuf = nullptr;
+
+  CpuMesh m_baseData;   ///< 未变换的原始数据
+  CpuMesh m_cpuData;    ///< 当前（已变换）数据
+  QVector<quint32> m_lineIndices;
+  QVector<LineVertex> m_vertexNormalLines;
+  QVector<LineVertex> m_faceNormalLines;
+
+  QString m_name;
+  bool m_visible = true;
+  QMatrix4x4 m_transform;
+
   int m_indexCount = 0;
+  int m_lineIndexCount = 0;
+  bool m_uploaded = false;
 };
 
 #endif  // MODELVIEWER_SRC_RENDERER_RHIMESH_H_

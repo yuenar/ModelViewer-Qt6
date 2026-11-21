@@ -12,9 +12,9 @@ layout(std140, binding = 0) uniform FrameUBO {
 };
 
 layout(std140, binding = 1) uniform MaterialUBO {
-    vec3  ambient;  float shininess;
-    vec3  diffuse;  float _mp0;
-    vec3  specular; float _mp1;
+    vec3  ambient;   float shininess;
+    vec3  diffuse;   float metallic;
+    vec3  specular;  float roughness;
 };
 
 void main() {
@@ -25,7 +25,7 @@ void main() {
 
     vec3 a = ambient  * lightColor;
     vec3 d = diffuse  * lightColor * max(dot(N, L), 0.0);
-    vec3 s = specular * lightColor * pow(max(dot(R, V), 0.0), shininess);
+    vec3 s = specular * lightColor * pow(max(dot(R, V), 0.0), max(shininess, 1.0));
 
     outColor = vec4(a + d + s, 1.0);
 }

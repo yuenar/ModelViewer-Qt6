@@ -62,6 +62,26 @@ void MaterialDialog::setupUI() {
     gridLayout->addWidget(shininessLabel, 3, 0);
     gridLayout->addWidget(m_shininessSpin, 3, 1);
     
+    // Metallic（PBR）
+    auto* metallicLabel = new QLabel("Metallic:", this);
+    m_metallicSpin = new QDoubleSpinBox(this);
+    m_metallicSpin->setRange(0.0, 1.0);
+    m_metallicSpin->setSingleStep(0.05);
+    m_metallicSpin->setValue(m_material.metallic);
+    
+    gridLayout->addWidget(metallicLabel, 4, 0);
+    gridLayout->addWidget(m_metallicSpin, 4, 1);
+    
+    // Roughness（PBR）
+    auto* roughnessLabel = new QLabel("Roughness:", this);
+    m_roughnessSpin = new QDoubleSpinBox(this);
+    m_roughnessSpin->setRange(0.0, 1.0);
+    m_roughnessSpin->setSingleStep(0.05);
+    m_roughnessSpin->setValue(m_material.roughness);
+    
+    gridLayout->addWidget(roughnessLabel, 5, 0);
+    gridLayout->addWidget(m_roughnessSpin, 5, 1);
+    
     layout->addLayout(gridLayout);
     
     // Buttons
@@ -81,6 +101,8 @@ void MaterialDialog::setupUI() {
 Material MaterialDialog::getMaterial() const {
     Material mat = m_material;
     mat.shininess = m_shininessSpin->value();
+    mat.metallic = m_metallicSpin->value();
+    mat.roughness = m_roughnessSpin->value();
     return mat;
 }
 

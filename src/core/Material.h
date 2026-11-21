@@ -87,6 +87,18 @@ struct Material {
   /// - 50.0f - 200.0f：较光滑表面（抛光金属）
   /// - 200.0f - 1000.0f：非常光滑的表面（镜子、水面）
   float shininess = 32.0f;
+  
+  /// @brief 金属度（仅 PBR 模式使用）
+  /// 
+  /// 0 表示绝缘体（塑料、木材等），1 表示纯金属。
+  /// 非金属通常取 0，金属表面取 1。
+  float metallic = 0.0f;
+  
+  /// @brief 粗糙度（仅 PBR 模式使用）
+  /// 
+  /// 0 表示镜面般光滑，1 表示完全粗糙。
+  /// 默认 0.5，适合大多数常见表面。
+  float roughness = 0.5f;
 };
 
 #endif  // MODELVIEWER_SRC_CORE_MATERIAL_H_

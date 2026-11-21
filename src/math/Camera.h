@@ -64,6 +64,10 @@ class Camera {
   
   /// @brief 析构函数，清理资源
   ~Camera();
+
+  // Camera 持有 TrackBall 指针，禁止浅拷贝
+  Camera(const Camera&) = delete;
+  Camera& operator=(const Camera&) = delete;
   
   /// @brief 获取视图矩阵
   /// 
@@ -85,10 +89,34 @@ class Camera {
   /// @note 投影矩阵包含近远裁剪面和视场角信息
   QMatrix4x4 projectionMatrix() const;
   
+  /// @brief 使用指定宽高比计算投影矩阵（用于分屏等场景）
+  QMatrix4x4 projectionMatrix(float aspect) const;
+  
+  /// @brief 获取当前宽高比
+  float aspectRatio() const { return m_aspectRatio; }
+  
   /// @brief 获取摄像机当前位置
   /// 
   /// @return QVector3D 摄像机在世界坐标系中的位置
   QVector3D position() const { return m_eye; }
+  
+  /// @brief 获取旋转中心（观察目标点）
+  QVector3D target() const { return m_pivot; }
+  
+  /// @brief 获取当前上方向
+  QVector3D upDirection() const { return m_up; }
+  
+  /// @brief 获取摄像机到目标点的距离
+  float distance() const { return (m_eye - m_pivot).length(); }
+  
+  /// @brief 获取当前投影类型
+  ProjectionType projectionType() const { return m_projType; }
+  
+  /// @brief 应用标准视图预设
+  /// 
+  /// @param[in] preset 0 前 / 1 后 / 2 左 / 3 右 / 4 顶 / 5 底 / 6 等轴测 / 7 二轴测 / 8 三轴测
+  /// @param[in] bbox 场景包围盒，用于计算合适的观察距离
+  void setViewPreset(int preset, const BoundingBox& bbox);
   
   /// @brief 设置摄像机宽高比
   /// 

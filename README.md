@@ -35,6 +35,29 @@ ModelViewer-Qt6 is a modern 3D model viewer that leverages Qt6's RHI (Rendering 
 - **Clipping Plane**: Geometric clipping display
 - **Split Screen**: Multi-rendering mode comparison
 
+### Implementation Status (2026-11-21)
+
+All 12 render modes are implemented and verified on Windows (D3D11):
+Phong, Wireframe (deduplicated edges), normal RGB, face/vertex normal lines,
+flat shading, PBR (Cook-Torrance + metallic/roughness), shadow mapping
+(compare sampler + 3x3 PCF), procedural skybox, selection highlight (CPU ray
+picking), clipping plane (fragment discard), split screen.
+
+Additional implemented features:
+- Display styles: Shaded / Wireframe / Wire-Shaded / Realistic
+- Orbit camera (rotation acts on the camera), camera-basis panning,
+  9 view presets, adaptive near/far
+- Axis and ground grid, 4-viewport multi-view
+- Multi-document tabs, object list (visibility, translate/rotate/scale, undo/redo),
+  recent files
+- Async model loading, node transforms, material color extraction, OBJ/STL export
+- 5 procedural surfaces (plane, sphere, torus, cylinder, cone)
+- Screenshot with custom resolution, HUD text overlay, cursor feedback
+- Command-line automation flags (`--help`)
+
+Not implemented (long-term): textures/IBL, MSAA/AO/post-processing, animation,
+model editing, collaboration, plugins, section capping, 3D text labels.
+
 ### Rendering Effects Gallery
 
 #### Basic Rendering
@@ -149,21 +172,25 @@ cmake --build . --config Release
 
 ##### Windows (Visual Studio)
 ```bash
-# 1. Install vcpkg
+# 1. Install vcpkg and dependencies
 git clone https://github.com/Microsoft/vcpkg.git
 cd vcpkg
 ./bootstrap-vcpkg.bat
-
-# 2. Install dependencies
-vcpkg install qt6:x64-windows
 vcpkg install assimp:x64-windows
 
-# 3. Configure CMake
-cmake -B build -S . -DCMAKE_TOOLCHAIN_FILE=D:/vcpkg/scripts/buildsystems/vcpkg.cmake
+# 2. Configure from the repository root (Qt is auto-detected from D:/Qt/6.*)
+cmake -B build -S .
+#    If Qt is elsewhere, pass -DQT_ROOT=<path-to-qt-kit>
 
-# 4. Build
+# 3. Build
 cmake --build build --config Release
+
+# 4. Run (Qt and assimp DLLs must be on PATH, or use windeployqt)
+build/Release/ModelViewer.exe
 ```
+
+> `VCPKG_APPLOCAL_DEPS` is disabled by default to avoid the PowerShell/AMSI
+> failure of `applocal.ps1`; deployment is done via PATH or `windeployqt`.
 
 ##### Linux (Ubuntu/Debian)
 ```bash
@@ -184,26 +211,31 @@ cmake --build . --config Release
 #### Basic Operations
 1. **Open Model**: File → Open, select a supported 3D model file
 2. **View Control**:
-   - Left mouse drag: Rotate model
-   - Right mouse drag: Pan view
-   - Mouse wheel: Zoom view
-3. **Rendering Mode**: Switch different rendering effects from View menu
-4. **Projection Switch**: View → Projection Mode, toggle between perspective/orthographic
+   - Left mouse drag: rotate (or the active interaction tool)
+   - Middle/right mouse drag: pan
+   - Mouse wheel: zoom
+3. **Display Style**: View → Display Style
+   (Shaded / Wireframe / Wire-Shaded / Realistic)
+4. **Rendering Mode**: View menu (12 modes)
+5. **Multi-View**: View → Multi-View (4 viewports)
+6. **Object Dock**: right side, visibility + translate/rotate/scale + undo/redo
+7. **Parametric Surfaces**: File → New Parametric Surface
+8. **Export**: File → Save As / Export (OBJ / STL)
 
 #### Advanced Features
 - **Material Settings**: Tools → Material Settings, adjust lighting parameters
 - **Light Settings**: Tools → Light Settings, configure light source properties
 - **Background Settings**: Tools → Background Settings, customize background color
-- **Screenshot**: Tools → Screenshot, save current rendering frame
+- **Screenshot**: Tools → Screenshot, save current rendering frame (optional WxH)
 
 #### Keyboard Shortcuts
-- `Space`: Reset view
-- `F`: Focus on selected object
-- `W`: Toggle wireframe mode
-- `N`: Show normals
-- `L`: Toggle lighting
-- `S`: Toggle shadows
-- `F11`: Fullscreen mode
+- `Space`: Reset view, `F`: Fit to view
+- `1`-`9`: View presets (front/back/left/right/top/bottom/isometric/dimetric/trimetric)
+- `W`: Wireframe, `N`: Normals, `S`: Shadows, `L`: Lighting toggle
+- `P`: Perspective/orthographic, `M`: Multi-view, `A`: Axis, `G`: Grid
+- `R`/`T`/`Z`/`V`: Rotate/Pan/Zoom/Select tool
+- `Ctrl+T` / `Ctrl+W`: New / close tab, `Ctrl+Z` / `Ctrl+Y`: Undo / redo
+- `F11`: Fullscreen
 
 ### Development Guide
 
@@ -332,6 +364,26 @@ ModelViewer-Qt6 是一个现代化的 3D 模型查看器，使用 Qt6 的 RHI（
 - **裁剪平面**：几何体裁剪显示
 - **分屏对比**：多种渲染模式对比
 
+### 实现状态（2026-11-21）
+
+12 种渲染模式已全部实现并在 Windows（D3D11）验证通过：
+Phong、线框（去重线段）、法线 RGB、面/顶点法线线段、平面着色、
+PBR（Cook-Torrance + metallic/roughness）、阴影映射（比较采样器 + 3x3 PCF）、
+程序化天空盒、选择高亮（CPU 射线拾取）、裁剪平面（片元 discard）、分屏。
+
+新增功能：
+- 四种显示风格：Shaded / Wireframe / Wire-Shaded / Realistic
+- 相机绕 pivot 旋转、基于相机基向量的平移、9 个视图预设、自适应近远面
+- 坐标轴 + 地面网格、四视口多视图
+- 多文档标签页、对象列表（可见性、平移/旋转/缩放、撤销/重做）、最近文件
+- 异步加载、节点变换、材质颜色提取、OBJ/STL 导出
+- 5 种参数曲面（平面/球/环/圆柱/圆锥）
+- 自定义分辨率截图、HUD 文字覆盖层、光标反馈
+- 命令行自动化参数（`--help`）
+
+暂未实现（长期项）：纹理/IBL、MSAA/AO/后处理、动画、模型编辑、
+协作、插件、剖面封盖、3D 文字标注。
+
 ### 渲染效果展示
 
 #### 基础渲染
@@ -432,21 +484,25 @@ ModelViewer-Qt6/
 
 #### Windows (Visual Studio)
 ```bash
-# 1. 安装 vcpkg
+# 1. 安装 vcpkg 与依赖
 git clone https://github.com/Microsoft/vcpkg.git
 cd vcpkg
 ./bootstrap-vcpkg.bat
-
-# 2. 安装依赖
-vcpkg install qt6:x64-windows
 vcpkg install assimp:x64-windows
 
-# 3. 配置 CMake
-cmake -B build -S . -DCMAKE_TOOLCHAIN_FILE=D:/vcpkg/scripts/buildsystems/vcpkg.cmake
+# 2. 从仓库根目录配置（Qt 自动探测 D:/Qt/6.*）
+cmake -B build -S .
+#    若 Qt 安装在别处，追加 -DQT_ROOT=<Qt kit 路径>
 
-# 4. 编译
-cmake --build build
+# 3. 编译
+cmake --build build --config Release
+
+# 4. 运行（Qt/assimp DLL 需加入 PATH，或使用 windeployqt）
+build/Release/ModelViewer.exe
 ```
+
+> 默认关闭 `VCPKG_APPLOCAL_DEPS`，避免 `applocal.ps1` 在部分环境的
+> PowerShell/AMSI 崩溃；依赖通过 PATH 或 `windeployqt` 部署。
 
 #### Linux/macOS
 ```bash
@@ -464,25 +520,29 @@ make -j$(nproc)
 ### 基本操作
 1. **打开模型**：文件 → 打开，选择支持的 3D 模型文件
 2. **视图控制**：
-   - 鼠标左键拖拽：旋转模型
-   - 鼠标右键拖拽：平移视图
-   - 鼠标滚轮：缩放视图
-3. **渲染模式**：视图菜单切换不同的渲染效果
-4. **投影切换**：视图 → 投影模式，在透视/正交间切换
+   - 鼠标左键拖拽：旋转（或当前交互工具）
+   - 鼠标中键/右键拖拽：平移
+   - 鼠标滚轮：缩放
+3. **显示风格**：视图 → Display Style（Shaded/Wireframe/Wire-Shaded/Realistic）
+4. **渲染模式**：视图菜单（12 种）
+5. **多视口**：视图 → Multi-View（四视口）
+6. **对象面板**：右侧，可见性 + 平移/旋转/缩放 + 撤销/重做
+7. **参数曲面**：文件 → New Parametric Surface
+8. **导出**：文件 → Save As / Export（OBJ / STL）
 
 ### 高级功能
 - **材质设置**：工具 → 材质设置，调整光照参数
 - **光照设置**：工具 → 光照设置，配置光源属性
 - **背景设置**：工具 → 背景设置，自定义背景颜色
-- **截图功能**：工具 → 截图，保存当前渲染画面
+- **截图功能**：工具 → 截图，保存当前渲染画面（可选 WxH 分辨率）
 
 ### 快捷键
-- `Space`：重置视图
-- `F`：聚焦选中物体
-- `W`：切换线框模式
-- `N`：显示法线
-- `L`：切换光照
-- `S`：切换阴影
+- `Space`：重置视图，`F`：适配视图
+- `1`-`9`：视图预设（前/后/左/右/顶/底/等轴测/二轴测/三轴测）
+- `W`：线框，`N`：法线，`S`：阴影，`L`：光照切换
+- `P`：透视/正交，`M`：多视口，`A`：坐标轴，`G`：网格
+- `R`/`T`/`Z`/`V`：旋转/平移/缩放/选择工具
+- `Ctrl+T` / `Ctrl+W`：新建/关闭标签页，`Ctrl+Z` / `Ctrl+Y`：撤销/重做
 - `F11`：全屏模式
 
 ## 开发指南

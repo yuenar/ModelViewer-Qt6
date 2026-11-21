@@ -884,3 +884,15 @@ connect(ui->actionOpen, &QAction::triggered, this, [this]{
 | `MainWindow.h / .cpp` | **极小改** | 成员类型 `GLWidget*` → `RhiWidget*` |
 | `ModelViewer.pro` | **删除** | 由 `CMakeLists.txt` 替代 |
 | `CMakeLists.txt` | **新增** | — |
+
+---
+
+## 附：迁移完成情况（2026-11-21）
+
+- 阶段 1 工程迁移：根 `CMakeLists.txt` + `add_subdirectory(src)`，Qt 自动探测，着色器统一 GLSL 460。
+- 阶段 2 渲染宿主：`QRhiWidget` 重写 `initialize/render/releaseResources`，渲染器生命周期幂等。
+- 阶段 3 GPU 资源：`RhiMesh` 上传顶点/索引，并预生成线框线段索引与法线线段。
+- 阶段 4 渲染状态：12 条管线全部创建并检查结果；新增显示风格、坐标轴、网格、多视口。
+- 阶段 5 Uniform：Frame UBO 改为动态偏移多槽位，支持多视口；Material 增加 metallic/roughness。
+- 阶段 6 着色器：新增 flat / normal_lines / pbr / shadow_depth / shadowed_phong / wire_overlay 等；阴影使用 D32F + 比较采样器，裁剪使用片元 discard。
+- 附加：对象变换、可见性、OBJ/STL 导出、参数曲面、异步加载、命令行自动化参数。

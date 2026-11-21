@@ -13,48 +13,184 @@
 // limitations under the License.
 
 #include <QApplication>
+#include <QCommandLineOption>
+#include <QCommandLineParser>
+#include <QTimer>
+#include <QDebug>
 #include "ui/MainWindow.h"
 
 /// @brief ModelViewer 应用程序入口点
-/// 
-/// 这是 ModelViewer 3D 模型查看器的主函数，负责：
-/// 1. 创建 Qt 应用程序实例
-/// 2. 创建并显示主窗口
-/// 3. 启动事件循环
-/// 
-/// 应用程序特性：
-/// - 基于 Qt6 框架构建
-/// - 支持跨平台运行（Windows、macOS、Linux）
-/// - 使用 RHI 进行硬件加速渲染
-/// - 支持多种 3D 模型格式
-/// 
-/// 命令行参数：
-/// - argc：命令行参数个数
-/// - argv：命令行参数数组
-/// 
-/// @param[in] argc 命令行参数个数
-/// @param[in] argv 命令行参数数组
-/// @return int 应用程序退出码，0 表示正常退出
-/// 
-/// @note 返回值传递给操作系统，用于判断程序执行状态
-/// @note 异常情况下会返回非零值
-int main(int argc, char *argv[])
-{
-  // 创建 Qt 应用程序实例
-  // QApplication 管理 GUI 应用程序的生命周期和事件处理
+///
+/// 支持的命令行参数（同时用于自动化回归）：
+/// --model <file>       启动后加载模型
+/// --surface <0-4>      创建参数曲面（平面/球/环/圆柱/圆锥）
+/// --mode <0-11>        初始渲染模式
+/// --display-style <0-3> 显示风格（Shaded/Wireframe/Wire-Shaded/Realistic）
+/// --view <0-8>         视图预设
+/// --select <index>     选中网格
+/// --multiview          四视口
+/// --axis / --grid      显示坐标轴 / 地面网格
+/// --tool <0-3>         交互工具（旋转/平移/缩放/选择）
+/// --screenshot <file>  延迟截图并退出
+/// --export <file>      导出 OBJ/STL 并退出
+/// --delay <ms>         截图延迟
+int main(int argc, char* argv[]) {
   QApplication app(argc, argv);
-  
-  // 创建主窗口实例
-  // MainWindow 包含完整的用户界面和渲染功能
+  QApplication::setApplicationName("ModelViewer");
+  QApplication::setApplicationVersion("1.1.0");
+
+  QCommandLineParser parser;
+  parser.setApplicationDescription("ModelViewer Qt6 RHI");
+  parser.addHelpOption();
+  parser.addVersionOption();
+
+  QCommandLineOption modelOption({"m", "model"}, "Model file to load.", "file");
+  QCommandLineOption surfaceOption("surface", "Create parametric surface (0-4).", "type", "-1");
+  QCommandLineOption modeOption("mode", "Initial render mode (0-11).", "mode", "-1");
+  QCommandLineOption styleOption("display-style",
+                                 "Display style (0-3): Shaded/Wireframe/Wire-Shaded/Realistic.",
+                                 "style", "-1");
+  QCommandLineOption viewOption("view", "View preset (0-8).", "preset", "-1");
+  QCommandLineOption selectOption("select", "Select mesh by index (-1 clears).", "index", "-1");
+  QCommandLineOption multiViewOption("multiview", "Enable 4-viewport mode.");
+  QCommandLineOption axisOption("axis", "Show axis.");
+  QCommandLineOption gridOption("grid", "Show ground grid.");
+  QCommandLineOption toolOption("tool", "Interaction tool (0-3).", "tool", "-1");
+  QCommandLineOption transformOption(
+      "transform", "Object transform: tx,ty,tz,rx,ry,rz,sx,sy,sz.", "values");
+  QCommandLineOption screenshotOption("screenshot", "Save screenshot and exit.", "file");
+  QCommandLineOption exportOption("export", "Export model and exit.", "file");
+  QCommandLineOption delayOption("delay", "Delay before screenshot (ms).", "ms", "2000");
+
+  parser.addOption(modelOption);
+  parser.addOption(surfaceOption);
+  parser.addOption(modeOption);
+  parser.addOption(styleOption);
+  parser.addOption(viewOption);
+  parser.addOption(selectOption);
+  parser.addOption(multiViewOption);
+  parser.addOption(axisOption);
+  parser.addOption(gridOption);
+  parser.addOption(toolOption);
+  parser.addOption(transformOption);
+  parser.addOption(screenshotOption);
+  parser.addOption(exportOption);
+  parser.addOption(delayOption);
+  parser.process(app);
+
   MainWindow window;
-  
-  // 显示主窗口
-  // 使窗口可见并进入正常的事件处理状态
   window.show();
-  
-  // 启动应用程序事件循环
-  // app.exec() 会阻塞直到应用程序退出
-  // 处理所有用户输入、定时器事件、网络事件等
-  // 返回值为应用程序的退出码
+
+  const bool hasModel = parser.isSet(modelOption) || parser.value(surfaceOption).toInt() >= 0;
+
+  // 与模型无关的选项可立即应用
+  if (parser.isSet(modeOption)) {
+    bool ok = false;
+    const int mode = parser.value(modeOption).toInt(&ok);
+    if (ok && mode >= 0 && mode <= 11) {
+      window.setRenderMode(mode);
+    }
+  }
+  if (parser.isSet(styleOption)) {
+    bool ok = false;
+    const int style = parser.value(styleOption).toInt(&ok);
+    if (ok && style >= 0 && style <= 3) {
+      window.applyDisplayStyle(style);
+    }
+  }
+  if (parser.isSet(multiViewOption)) {
+    window.setMultiView(true);
+  }
+  if (parser.isSet(axisOption)) {
+    window.setAxisVisible(true);
+  }
+  if (parser.isSet(gridOption)) {
+    window.setGridVisible(true);
+  }
+  if (parser.isSet(toolOption)) {
+    bool ok = false;
+    const int tool = parser.value(toolOption).toInt(&ok);
+    if (ok && tool >= 0 && tool <= 3) {
+      window.setToolMode(tool);
+    }
+  }
+
+  // 需要模型/曲面加载完成后再执行
+  auto applySceneOptions = [&window, &parser, &viewOption, &selectOption,
+                            &transformOption]() {
+    if (parser.isSet(viewOption)) {
+      bool ok = false;
+      const int preset = parser.value(viewOption).toInt(&ok);
+      if (ok && preset >= 0 && preset <= 8) {
+        window.applyViewPreset(preset);
+      }
+    }
+
+    int selectedIndex = 0;
+    if (parser.isSet(selectOption)) {
+      selectedIndex = parser.value(selectOption).toInt();
+      window.selectMesh(selectedIndex);
+    }
+
+    if (parser.isSet(transformOption)) {
+      const QStringList parts = parser.value(transformOption).split(',');
+      if (parts.size() == 9) {
+        QVector3D translate(parts[0].toFloat(), parts[1].toFloat(), parts[2].toFloat());
+        QVector3D rotate(parts[3].toFloat(), parts[4].toFloat(), parts[5].toFloat());
+        QVector3D scale(parts[6].toFloat(), parts[7].toFloat(), parts[8].toFloat());
+        window.setMeshTransformValues(qMax(0, selectedIndex),
+                                      translate, rotate, scale);
+      }
+    }
+  };
+
+  auto captureAndQuit = [&window, &parser, &screenshotOption]() {
+    window.saveScreenshotTo(parser.value(screenshotOption));
+    QTimer::singleShot(150, qApp, &QApplication::quit);
+  };
+
+  auto exportAndQuit = [&window, &parser, &exportOption]() {
+    window.exportModelTo(parser.value(exportOption));
+    QTimer::singleShot(150, qApp, &QApplication::quit);
+  };
+
+  if (hasModel) {
+    QObject::connect(&window, &MainWindow::modelLoaded, &window,
+                     [applySceneOptions]() { applySceneOptions(); });
+    if (parser.isSet(screenshotOption)) {
+      QObject::connect(
+          &window, &MainWindow::modelLoaded, &window,
+          [captureAndQuit]() {
+            QTimer::singleShot(600, qApp, [captureAndQuit]() { captureAndQuit(); });
+          });
+    }
+    if (parser.isSet(exportOption)) {
+      QObject::connect(&window, &MainWindow::modelLoaded, &window,
+                       [exportAndQuit]() { exportAndQuit(); });
+    }
+  } else {
+    applySceneOptions();
+    if (parser.isSet(exportOption)) {
+      QTimer::singleShot(0, qApp, [exportAndQuit]() { exportAndQuit(); });
+    }
+  }
+
+  if (parser.isSet(screenshotOption) && !hasModel) {
+    const int delay = qMax(100, parser.value(delayOption).toInt());
+    QTimer::singleShot(delay, qApp, [captureAndQuit]() { captureAndQuit(); });
+  }
+
+  // 安全兜底：避免加载失败导致进程悬挂
+  if (parser.isSet(screenshotOption) || parser.isSet(exportOption)) {
+    QTimer::singleShot(30000, qApp, &QApplication::quit);
+  }
+
+  const int surface = parser.value(surfaceOption).toInt();
+  if (surface >= 0 && surface <= 4) {
+    window.createSurface(surface);
+  } else if (parser.isSet(modelOption)) {
+    window.openModel(parser.value(modelOption));
+  }
+
   return app.exec();
 }

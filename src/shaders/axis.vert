@@ -1,17 +1,21 @@
-#version 450 core
+#version 460
 
-layout(location = 0) in vec3 vertexPosition;
-layout(location = 1) in vec3 vertexColor;
+layout(location = 0) in vec3 inPosition;
+layout(location = 1) in vec3 inColor;
 
-layout(location = 0) out vec3 fragmentColor;
-
-layout(std140, binding = 0) uniform TransformUBO {
-    mat4 modelViewMatrix;
-    mat4 projectionMatrix;
+layout(std140, binding = 0) uniform FrameUBO {
+    mat4 model;
+    mat4 view;
+    mat4 projection;
+    mat4 normalMatrix;
+    vec3 lightPos;   float _p0;
+    vec3 lightColor; float _p1;
+    vec3 viewPos;    float _p2;
 };
 
-void main()
-{
-    gl_Position = projectionMatrix * modelViewMatrix * vec4(vertexPosition, 1);
-    fragmentColor = vertexColor;
+layout(location = 0) out vec3 vColor;
+
+void main() {
+    vColor = inColor;
+    gl_Position = projection * view * model * vec4(inPosition, 1.0);
 }

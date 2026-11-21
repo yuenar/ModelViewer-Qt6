@@ -84,6 +84,15 @@ class TrackBall {
   /// @note 可以直接应用于 3D 物体或摄像机
   QQuaternion rotation() const;
   
+  /// @brief 计算两次屏幕坐标之间的增量旋转
+  /// 
+  /// 与 move() 不同，该函数不累积状态，供相机绕 pivot 旋转时使用。
+  /// 
+  /// @param[in] from 上一次的屏幕坐标
+  /// @param[in] to 当前的屏幕坐标
+  /// @return QQuaternion 增量旋转四元数
+  QQuaternion deltaRotation(const QPointF& from, const QPointF& to) const;
+  
   /// @brief 重置轨迹球状态
   /// 
   /// 将旋转重置为单位四元数（无旋转状态），
