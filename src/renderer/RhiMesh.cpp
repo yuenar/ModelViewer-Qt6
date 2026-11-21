@@ -20,6 +20,10 @@ RhiMesh::RhiMesh(QRhi* rhi, const CpuMesh& cpu)
       m_indexCount(cpu.indices.size())
 {
     m_material.diffuse = cpu.baseColor;
+    initSkinData(cpu);
+    if (m_skinned) {
+        updateBoneMatrices(nullptr);
+    }
     rebuildCpuData();
 }
 
@@ -64,12 +68,123 @@ RhiMesh* RhiMesh::clone() const {
     copy->m_animDelta = m_animDelta;
     copy->m_userTransform = m_userTransform;
     copy->m_transform = m_animDelta * m_userTransform;
+    copy->m_boneMatrices = m_boneMatrices;
+    copy->m_boneNormalMatrices = m_boneNormalMatrices;
     copy->rebuildCpuData();
     return copy;
 }
 
-void RhiMesh::rebuildCpuData() {
-    m_cpuData = m_baseData;
+void RhiMesh::initSkinData(const CpuMesh& cpu) {
+    m_skinned = cpu.isSkinned();
+    if (!m_skinned) {
+        return;
+    }
+
+    m_skinWeights = cpu.skinWeights;
+    m_boneNames = cpu.boneNames;
+    m_boneOffsets = cpu.boneOffsets;
+    m_boneBindMatrices = cpu.boneBindMatrices;
+    m_bonePaths = cpu.bonePaths;
+    m_boneRestLocals = cpu.boneRestLocals;
+    m_boneMatrices = m_boneBindMatrices;
+    m_boneNormalMatrices.resize(m_boneMatrices.size());
+    for (int i = 0; i < m_boneMatrices.size(); ++i) {
+        m_boneNormalMatrices[i] = m_boneMatrices[i].inverted().transposed();
+    }
+}
+
+void RhiMesh::updateBoneMatrices(const QHash<QString, QMatrix4x4>* poses) {
+    const int count = m_boneNames.size();
+    m_boneMatrices.resize(count);
+    m_boneNormalMatrices.resize(count);
+
+    for (int i = 0; i < count; ++i) {
+        QMatrix4x4 matrix;
+
+        if (i < m_bonePaths.size() && !m_bonePaths[i].isEmpty()) {
+            const QVector<QString>& path = m_bonePaths[i];
+            const QVector<QMatrix4x4>& rest =
+                (i < m_boneRestLocals.size()) ? m_boneRestLocals[i]
+                                              : QVector<QMatrix4x4>();
+            QMatrix4x4 world;
+            for (int j = 0; j < path.size(); ++j) {
+                QMatrix4x4 local =
+                    (j < rest.size()) ? rest[j] : QMatrix4x4();
+                if (poses) {
+                    auto it = poses->constFind(path[j]);
+                    if (it != poses->constEnd()) {
+                        local = it.value();
+                    }
+                }
+                world *= local;
+            }
+            const QMatrix4x4 offset =
+                (i < m_boneOffsets.size()) ? m_boneOffsets[i] : QMatrix4x4();
+            matrix = world * offset;
+        } else if (i < m_boneBindMatrices.size()) {
+            matrix = m_boneBindMatrices[i];
+        }
+
+        m_boneMatrices[i] = matrix;
+        m_boneNormalMatrices[i] = matrix.inverted().transposed();
+    }
+}
+
+void RhiMesh::skinVertices() {
+    const int vertexCount = qMin(m_cpuData.vertices.size(),
+                                 m_skinWeights.size());
+    for (int i = 0; i < vertexCount; ++i) {
+        const CpuMesh::Vertex& src = m_baseData.vertices[i];
+        const CpuMesh::SkinVertex& skin = m_skinWeights[i];
+
+        QVector3D position;
+        QVector3D normal;
+        for (int k = 0; k < 4; ++k) {
+            const float weight = skin.weight[k];
+            if (weight <= 1e-6f) {
+                continue;
+            }
+            const int bone = int(skin.boneIndex[k]);
+            if (bone < 0 || bone >= m_boneMatrices.size()) {
+                continue;
+            }
+            position += weight * m_boneMatrices[bone].map(src.position);
+            normal += weight * m_boneNormalMatrices[bone].mapVector(src.normal);
+        }
+
+        m_cpuData.vertices[i].position = position;
+        if (normal.lengthSquared() > 1e-12f) {
+            m_cpuData.vertices[i].normal = normal.normalized();
+        } else {
+            m_cpuData.vertices[i].normal = src.normal;
+        }
+    }
+}
+
+void RhiMesh::applyBonePoses(const QHash<QString, QMatrix4x4>& poses) {
+    if (!m_skinned) {
+        return;
+    }
+    updateBoneMatrices(&poses);
+    rebuildCpuData(false);
+    releaseGpu();
+}
+
+void RhiMesh::resetSkinPose() {
+    if (!m_skinned) {
+        return;
+    }
+    updateBoneMatrices(nullptr);
+    rebuildCpuData(false);
+    releaseGpu();
+}
+
+void RhiMesh::rebuildCpuData(bool updateDerived) {
+    m_cpuData.vertices = m_baseData.vertices;
+
+    if (m_skinned) {
+        skinVertices();
+    }
 
     const QMatrix4x4 normalMatrix = m_transform.inverted().transposed();
     for (auto& vertex : m_cpuData.vertices) {
@@ -88,7 +203,12 @@ void RhiMesh::rebuildCpuData() {
                    : (m_cpuData.bbox.max() - m_center).length();
 
     m_indexCount = m_cpuData.indices.size();
-    rebuildDerivedData();
+    if (updateDerived) {
+        rebuildDerivedData();
+    } else {
+        // 蒙皮每帧更新：拓扑与 LOD 不变，只需刷新法线线段
+        buildNormalLines();
+    }
 }
 
 void RhiMesh::rebuildDerivedData() {

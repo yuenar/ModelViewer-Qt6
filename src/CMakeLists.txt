@@ -6,6 +6,8 @@ file(GLOB_RECURSE RENDERER_SOURCES "renderer/*.cpp" "renderer/*.h")
 file(GLOB_RECURSE UI_SOURCES "ui/*.cpp" "ui/*.h")
 file(GLOB_RECURSE LOADER_SOURCES "loader/*.cpp" "loader/*.h")
 file(GLOB_RECURSE MATH_SOURCES "math/*.cpp" "math/*.h")
+file(GLOB_RECURSE NET_SOURCES "net/*.cpp" "net/*.h")
+file(GLOB_RECURSE PLUGIN_SOURCES "plugin/*.cpp" "plugin/*.h")
 
 qt_add_executable(ModelViewer
     main.cpp
@@ -14,6 +16,8 @@ qt_add_executable(ModelViewer
     ${UI_SOURCES}
     ${LOADER_SOURCES}
     ${MATH_SOURCES}
+    ${NET_SOURCES}
+    ${PLUGIN_SOURCES}
 )
 
 # ── 着色器：统一编译为多后端 QSB（GLSL 460 / HLSL 50 / MSL 12）────────
@@ -66,6 +70,7 @@ qt_add_shaders(ModelViewer "shaders"
 target_link_libraries(ModelViewer PRIVATE
     Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Concurrent Qt6::ShaderTools Qt6::GuiPrivate
     Qt6::Qml
+    Qt6::Network
     assimp::assimp
 )
 

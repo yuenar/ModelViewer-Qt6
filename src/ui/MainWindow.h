@@ -36,6 +36,8 @@ class QUndoStack;
 class QTimer;
 class QJsonObject;
 class ScriptConsole;
+class CollabSession;
+class PluginManager;
 class RhiWidget;
 
 /// @brief 应用程序主窗口
@@ -55,7 +57,7 @@ class MainWindow : public QMainWindow {
     bool operator!=(const MeshParams& other) const { return !(*this == other); }
   };
   explicit MainWindow(QWidget* parent = nullptr);
-  ~MainWindow() override = default;
+  ~MainWindow() override;
 
   void openModel(const QString& path);
   void setRenderMode(int mode);
@@ -95,6 +97,12 @@ class MainWindow : public QMainWindow {
   /// @brief 脚本/插件
   bool runScriptFile(const QString& path);
   void loadPlugins();
+  void loadNativePlugins();
+
+  /// @brief 网络实时协作
+  bool hostCollabSession(quint16 port);
+  bool joinCollabSession(const QString& host, quint16 port);
+  void disconnectCollabSession();
 
   /// @brief 应用对象变换参数（供撤销/重做命令调用）
   void applyMeshParams(int index, const MeshParams& params);
@@ -170,6 +178,12 @@ class MainWindow : public QMainWindow {
   void onToggleLocalSync(bool enabled);
   void onSyncTick();
   void onScriptConsole();
+  ScriptConsole* ensureScriptConsole();
+  void onHostSession();
+  void onJoinSession();
+  void onNetTick();
+  void ensureCollabSession();
+  void handleRemoteSceneState(const QJsonObject& state);
 
   RhiWidget* m_rhiWidget = nullptr;
   QTabWidget* m_tabs = nullptr;
@@ -211,6 +225,12 @@ class MainWindow : public QMainWindow {
   QString m_syncPath;
   QByteArray m_lastSyncHash;
   ScriptConsole* m_scriptConsole = nullptr;
+
+  CollabSession* m_collab = nullptr;
+  QTimer* m_netTimer = nullptr;
+  QByteArray m_lastNetHash;
+
+  PluginManager* m_nativePlugins = nullptr;
 };
 
 #endif  // MODELVIEWER_SRC_UI_MAINWINDOW_H_

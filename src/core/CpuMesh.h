@@ -56,6 +56,12 @@ struct CpuMesh {
     /// 坐标范围通常为 [0, 1]，原点 (0,0) 在纹理左下角。
     QVector2D texCoord;
   };
+
+  /// @brief 骨骼蒙皮权重（每顶点最多 4 根骨骼）
+  struct SkinVertex {
+    quint32 boneIndex[4] = {0, 0, 0, 0};
+    float weight[4] = {0.0f, 0.0f, 0.0f, 0.0f};
+  };
   
   /// @brief 顶点数组，存储网格的所有顶点数据
   /// 
@@ -96,6 +102,31 @@ struct CpuMesh {
 
   /// @brief 加载时烘焙到顶点上的静止世界变换
   QMatrix4x4 restWorld;
+
+  // ── 骨骼蒙皮（为空表示非蒙皮网格）─────────────────────────
+  /// @brief 每顶点的骨骼索引与权重（与 vertices 一一对应）
+  QVector<SkinVertex> skinWeights;
+
+  /// @brief 绑定到该网格的骨骼名称
+  QVector<QString> boneNames;
+
+  /// @brief 每根骨骼的逆绑定矩阵（mesh 局部空间）
+  QVector<QMatrix4x4> boneOffsets;
+
+  /// @brief 每根骨骼的静止世界矩阵 * 逆绑定矩阵（绑定姿态下的蒙皮矩阵）
+  QVector<QMatrix4x4> boneBindMatrices;
+
+  /// @brief 每根骨骼从根到骨骼节点的节点名链
+  QVector<QVector<QString>> bonePaths;
+
+  /// @brief 与 bonePaths 平行的静止局部变换
+  QVector<QVector<QMatrix4x4>> boneRestLocals;
+
+  /// @brief 是否为骨骼蒙皮网格
+  bool isSkinned() const {
+    return !skinWeights.isEmpty() && !boneNames.isEmpty() &&
+           boneNames.size() == boneOffsets.size();
+  }
 };
 
 #endif  // MODELVIEWER_SRC_CORE_CPUMESH_H_

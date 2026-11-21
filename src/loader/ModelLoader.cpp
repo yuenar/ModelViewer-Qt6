@@ -93,9 +93,12 @@ QImage loadDiffuseTexture(const aiScene* scene, unsigned int materialIndex,
 }
 
 /// @brief 将 aiMesh 转成 CpuMesh，并应用节点累积变换
+///
+/// @param[in] bakeTransform 为 false 时保留网格局部坐标（骨骼蒙皮网格），
+///            包围盒仍按世界空间计算，供相机适配使用。
 CpuMesh buildMesh(const aiScene* scene, const aiMesh* aiMesh,
                   const QMatrix4x4& transform, const QString& name,
-                  const QImage& diffuseTexture) {
+                  const QImage& diffuseTexture, bool bakeTransform) {
   CpuMesh cpuMesh;
   cpuMesh.name = name;
   cpuMesh.baseColor = materialDiffuse(scene, aiMesh->mMaterialIndex);
@@ -106,12 +109,22 @@ CpuMesh buildMesh(const aiScene* scene, const aiMesh* aiMesh,
   cpuMesh.vertices.reserve(aiMesh->mNumVertices);
   for (unsigned int j = 0; j < aiMesh->mNumVertices; ++j) {
     CpuMesh::Vertex vertex;
-    vertex.position = transform.map(QVector3D(
-        aiMesh->mVertices[j].x, aiMesh->mVertices[j].y, aiMesh->mVertices[j].z));
+    const QVector3D raw(aiMesh->mVertices[j].x, aiMesh->mVertices[j].y,
+                        aiMesh->mVertices[j].z);
+    const QVector3D world = transform.map(raw);
+
+    if (bakeTransform) {
+      vertex.position = world;
+    } else {
+      vertex.position = raw;
+    }
 
     if (aiMesh->HasNormals()) {
-      vertex.normal = normalMatrix.mapVector(QVector3D(
-          aiMesh->mNormals[j].x, aiMesh->mNormals[j].y, aiMesh->mNormals[j].z)).normalized();
+      const QVector3D normal(aiMesh->mNormals[j].x, aiMesh->mNormals[j].y,
+                             aiMesh->mNormals[j].z);
+      vertex.normal = bakeTransform
+                          ? normalMatrix.mapVector(normal).normalized()
+                          : normal.normalized();
     } else {
       vertex.normal = QVector3D(0, 0, 1);
     }
@@ -122,7 +135,7 @@ CpuMesh buildMesh(const aiScene* scene, const aiMesh* aiMesh,
     }
 
     cpuMesh.vertices.append(vertex);
-    cpuMesh.bbox.expand(vertex.position);
+    cpuMesh.bbox.expand(world);
   }
 
   cpuMesh.indices.reserve(aiMesh->mNumFaces * 3);
@@ -136,6 +149,89 @@ CpuMesh buildMesh(const aiScene* scene, const aiMesh* aiMesh,
   }
 
   return cpuMesh;
+}
+
+/// @brief 从 aiBone 提取骨骼蒙皮数据
+void fillSkinData(
+    CpuMesh& mesh, const aiMesh* aiMesh, const QMatrix4x4& meshWorld,
+    const QHash<QString, QPair<QVector<QString>, QVector<QMatrix4x4>>>&
+        nodeChains) {
+  mesh.skinWeights.clear();
+  mesh.skinWeights.resize(mesh.vertices.size());
+
+  for (unsigned int b = 0; b < aiMesh->mNumBones; ++b) {
+    const aiBone* bone = aiMesh->mBones[b];
+    if (!bone) {
+      continue;
+    }
+
+    const QString boneName = QString::fromUtf8(bone->mName.C_Str());
+    const QMatrix4x4 offset = toQtMatrix(bone->mOffsetMatrix);
+
+    QVector<QString> path;
+    QVector<QMatrix4x4> restLocals;
+    QMatrix4x4 boneWorld = meshWorld;
+
+    auto chainIt = nodeChains.constFind(boneName);
+    if (chainIt != nodeChains.constEnd()) {
+      path = chainIt.value().first;
+      restLocals = chainIt.value().second;
+      boneWorld = QMatrix4x4();
+      for (const QMatrix4x4& local : restLocals) {
+        boneWorld *= local;
+      }
+    }
+
+    const int boneIndex = mesh.boneNames.size();
+    mesh.boneNames.append(boneName);
+    mesh.boneOffsets.append(offset);
+    mesh.boneBindMatrices.append(boneWorld * offset);
+    mesh.bonePaths.append(path);
+    mesh.boneRestLocals.append(restLocals);
+
+    for (unsigned int w = 0; w < bone->mNumWeights; ++w) {
+      const aiVertexWeight& weight = bone->mWeights[w];
+      if (weight.mVertexId >= mesh.skinWeights.size() ||
+          weight.mWeight <= 1e-6f) {
+        continue;
+      }
+
+      CpuMesh::SkinVertex& skin = mesh.skinWeights[weight.mVertexId];
+      int slot = -1;
+      for (int k = 0; k < 4; ++k) {
+        if (skin.weight[k] <= 1e-6f) {
+          slot = k;
+          break;
+        }
+      }
+      if (slot < 0) {
+        slot = 0;
+        for (int k = 1; k < 4; ++k) {
+          if (skin.weight[k] < skin.weight[slot]) {
+            slot = k;
+          }
+        }
+      }
+      skin.boneIndex[slot] = quint32(boneIndex);
+      skin.weight[slot] = weight.mWeight;
+    }
+  }
+
+  // 归一化权重；无权重顶点回退到第一根骨骼
+  for (CpuMesh::SkinVertex& skin : mesh.skinWeights) {
+    float sum = 0.0f;
+    for (int k = 0; k < 4; ++k) {
+      sum += skin.weight[k];
+    }
+    if (sum <= 1e-6f) {
+      skin.boneIndex[0] = 0;
+      skin.weight[0] = 1.0f;
+    } else {
+      for (int k = 0; k < 4; ++k) {
+        skin.weight[k] /= sum;
+      }
+    }
+  }
 }
 
 }  // namespace
@@ -179,6 +275,16 @@ ModelAsset ModelLoader::loadWithAssimp(const QString& path) {
   QVector<CpuMesh>& meshes = asset.meshes;
   QHash<unsigned int, QImage> textureCache;
   QHash<QString, aiNode*> nodeMap;
+  // 节点名 -> (根到该节点的名称链, 静止局部变换)
+  QHash<QString, QPair<QVector<QString>, QVector<QMatrix4x4>>> nodeChains;
+
+  // 蒙皮数据需要等整棵节点树遍历完（骨骼节点可能在网格节点之后）再填充
+  struct PendingSkin {
+    int meshIndex = 0;
+    const aiMesh* mesh = nullptr;
+    QMatrix4x4 world;
+  };
+  QVector<PendingSkin> pendingSkins;
 
   // 当前遍历路径（根 → 当前节点）及其静止局部变换
   QVector<QString> nodePath;
@@ -201,6 +307,7 @@ ModelAsset ModelLoader::loadWithAssimp(const QString& path) {
         nodeMap.insert(nodeName, node);
         nodePath.append(nodeName);
         nodeLocals.append(local);
+        nodeChains.insert(nodeName, qMakePair(nodePath, nodeLocals));
 
         for (unsigned int i = 0; i < node->mNumMeshes; ++i) {
           const unsigned int meshIndex = node->mMeshes[i];
@@ -224,12 +331,16 @@ ModelAsset ModelLoader::loadWithAssimp(const QString& path) {
                 loadDiffuseTexture(scene, materialIndex, path));
           }
 
-          CpuMesh cpuMesh = buildMesh(scene, aiMesh, global, meshName, it.value());
+          CpuMesh cpuMesh = buildMesh(scene, aiMesh, global, meshName,
+                                      it.value(), aiMesh->mNumBones == 0);
           if (!cpuMesh.vertices.isEmpty() && !cpuMesh.indices.isEmpty()) {
             cpuMesh.nodeName = nodeName;
             cpuMesh.nodePath = nodePath;
             cpuMesh.nodeRestLocals = nodeLocals;
             cpuMesh.restWorld = global;
+            if (aiMesh->mNumBones > 0) {
+              pendingSkins.append({int(meshes.size()), aiMesh, global});
+            }
             meshes.append(cpuMesh);
           }
         }
@@ -243,6 +354,14 @@ ModelAsset ModelLoader::loadWithAssimp(const QString& path) {
       };
 
   processNode(scene->mRootNode, QMatrix4x4());
+
+  for (const PendingSkin& pending : pendingSkins) {
+    if (pending.meshIndex >= 0 && pending.meshIndex < meshes.size() &&
+        pending.mesh) {
+      fillSkinData(meshes[pending.meshIndex], pending.mesh, pending.world,
+                   nodeChains);
+    }
+  }
 
   // ── 提取节点关键帧动画 ───────────────────────────────────
   const double defaultTicksPerSecond = 25.0;

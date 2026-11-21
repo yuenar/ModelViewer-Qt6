@@ -84,6 +84,18 @@ void ViewerScriptApi::fitView() {
     if (m_view) m_view->fitToView();
 }
 
+void ViewerScriptApi::viewBack() {
+    if (m_view) m_view->goBack();
+}
+
+void ViewerScriptApi::viewForward() {
+    if (m_view) m_view->goForward();
+}
+
+int ViewerScriptApi::viewHistorySize() const {
+    return m_view ? m_view->viewHistorySize() : 0;
+}
+
 void ViewerScriptApi::setMeshColor(int index, double r, double g, double b) {
     if (!m_view) return;
     Material material = m_view->meshMaterial(index);

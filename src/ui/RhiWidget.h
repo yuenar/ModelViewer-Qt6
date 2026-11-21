@@ -64,6 +64,8 @@ class RhiWidget : public QRhiWidget {
   Light getLight() const { return m_light; }
 
   void setBackgroundColors(const QVector3D& topColor, const QVector3D& botColor);
+  QVector3D backgroundTopColor() const { return m_bgTopColor; }
+  QVector3D backgroundBottomColor() const { return m_bgBotColor; }
   void fitToView();
   void applyViewPreset(int preset);
 
@@ -153,9 +155,26 @@ class RhiWidget : public QRhiWidget {
   Camera& getCamera() { return m_camera; }
   const Camera& getCamera() const { return m_camera; }
 
+  // ── 视图历史 / 过渡动画 ──────────────────────────────────
+  struct ViewState {
+    QVector3D eye;
+    QVector3D target;
+    QVector3D up;
+  };
+  void recordViewState();
+  bool canGoBack() const { return m_viewHistoryIndex > 0; }
+  bool canGoForward() const {
+    return m_viewHistoryIndex >= 0 &&
+           m_viewHistoryIndex + 1 < m_viewHistory.size();
+  }
+  void goBack();
+  void goForward();
+  int viewHistorySize() const { return m_viewHistory.size(); }
+
  signals:
   void projectionChanged(bool orthographic);
   void meshesChanged();
+  void viewHistoryChanged();
 
  protected:
   void initialize(QRhiCommandBuffer* cb) override;
@@ -176,6 +195,9 @@ class RhiWidget : public QRhiWidget {
   void applyAnimationTime(float time);
   void advanceAnimation();
   void resetAnimationDeltas();
+  ViewState currentViewState() const;
+  void animateToViewState(const ViewState& state);
+  bool viewStateNear(const ViewState& a, const ViewState& b) const;
 
   RhiRenderer* m_renderer = nullptr;
   Camera m_camera;
@@ -219,6 +241,16 @@ class RhiWidget : public QRhiWidget {
   float m_animTime = 0.0f;
   float m_animSpeed = 1.0f;
   bool m_animPlaying = false;
+
+  // ── 视图历史状态 ─────────────────────────────────────────
+  QVector<ViewState> m_viewHistory;
+  int m_viewHistoryIndex = -1;
+  QTimer* m_viewAnimTimer = nullptr;
+  QTimer* m_viewRecordTimer = nullptr;
+  QElapsedTimer m_viewAnimClock;
+  ViewState m_viewAnimFrom;
+  ViewState m_viewAnimTo;
+  bool m_viewAnimating = false;
 };
 
 #endif  // MODELVIEWER_SRC_UI_RHIWIDGET_H_

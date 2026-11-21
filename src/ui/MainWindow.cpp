@@ -3,6 +3,8 @@
 #include "MaterialDialog.h"
 #include "LightDialog.h"
 #include "ScriptConsole.h"
+#include "../net/CollabSession.h"
+#include "../plugin/PluginManager.h"
 #include "../renderer/RhiRenderer.h"
 #include "../loader/ModelLoader.h"
 #include "../loader/ModelExporter.h"
@@ -173,6 +175,16 @@ MainWindow::MainWindow(QWidget* parent)
     resize(1280, 860);
 
     loadPlugins();
+    loadNativePlugins();
+}
+
+MainWindow::~MainWindow() {
+    if (m_netTimer) {
+        m_netTimer->stop();
+    }
+    if (m_collab) {
+        m_collab->disconnectSession();
+    }
 }
 
 void MainWindow::setupUI() {
@@ -547,6 +559,22 @@ void MainWindow::setupMenus() {
         });
     }
 
+    QMenu* historyMenu = viewMenu->addMenu("View &History");
+    QAction* backAction = historyMenu->addAction("&Back");
+    backAction->setShortcut(QKeySequence("Alt+Left"));
+    connect(backAction, &QAction::triggered, this, [this]() {
+        if (m_rhiWidget) {
+            m_rhiWidget->goBack();
+        }
+    });
+    QAction* forwardAction = historyMenu->addAction("&Forward");
+    forwardAction->setShortcut(QKeySequence("Alt+Right"));
+    connect(forwardAction, &QAction::triggered, this, [this]() {
+        if (m_rhiWidget) {
+            m_rhiWidget->goForward();
+        }
+    });
+
     QMenu* toolMenu = viewMenu->addMenu("Interaction &Tool");
     m_toolGroup = new QActionGroup(this);
     m_toolGroup->setExclusive(true);
@@ -699,6 +727,17 @@ void MainWindow::setupMenus() {
     connect(syncAction, &QAction::toggled, this,
             &MainWindow::onToggleLocalSync);
 
+    collabMenu->addSeparator();
+    QAction* hostAction = collabMenu->addAction("&Host Session...");
+    connect(hostAction, &QAction::triggered, this,
+            &MainWindow::onHostSession);
+    QAction* joinAction = collabMenu->addAction("&Join Session...");
+    connect(joinAction, &QAction::triggered, this,
+            &MainWindow::onJoinSession);
+    QAction* disconnectAction = collabMenu->addAction("&Disconnect");
+    connect(disconnectAction, &QAction::triggered, this,
+            &MainWindow::disconnectCollabSession);
+
     QAction* scriptConsoleAction = toolsMenu->addAction("&Script Console...");
     connect(scriptConsoleAction, &QAction::triggered, this,
             &MainWindow::onScriptConsole);
@@ -706,6 +745,11 @@ void MainWindow::setupMenus() {
     connect(reloadPluginsAction, &QAction::triggered, this, [this]() {
         loadPlugins();
         statusBar()->showMessage("Script plugins reloaded", 3000);
+    });
+    QAction* reloadNativeAction = toolsMenu->addAction("Reload &C++ Plugins");
+    connect(reloadNativeAction, &QAction::triggered, this, [this]() {
+        loadNativePlugins();
+        statusBar()->showMessage("C++ plugins reloaded", 3000);
     });
 
     toolsMenu->addSeparator();
@@ -1258,6 +1302,21 @@ QJsonObject MainWindow::captureSceneState() const {
     root.insert("fxaa", m_rhiWidget->isFxaaEnabled());
     root.insert("ao", m_rhiWidget->isAoEnabled());
 
+    QJsonArray bgTop;
+    const QVector3D topColor = m_rhiWidget->backgroundTopColor();
+    bgTop.append(topColor.x());
+    bgTop.append(topColor.y());
+    bgTop.append(topColor.z());
+    QJsonArray bgBottom;
+    const QVector3D bottomColor = m_rhiWidget->backgroundBottomColor();
+    bgBottom.append(bottomColor.x());
+    bgBottom.append(bottomColor.y());
+    bgBottom.append(bottomColor.z());
+    QJsonObject background;
+    background.insert("top", bgTop);
+    background.insert("bottom", bgBottom);
+    root.insert("background", background);
+
     QJsonArray clipArray;
     const QVector4D clip = m_rhiWidget->clippingPlane();
     clipArray.append(clip.x());
@@ -1357,6 +1416,15 @@ bool MainWindow::applySceneState(const QJsonObject& root, QString* errorMessage)
                                        root.value("ao").toBool());
     }
 
+    const QJsonObject background = root.value("background").toObject();
+    if (!background.isEmpty()) {
+        m_rhiWidget->setBackgroundColors(
+            readVec3(background.value("top"),
+                     m_rhiWidget->backgroundTopColor()),
+            readVec3(background.value("bottom"),
+                     m_rhiWidget->backgroundBottomColor()));
+    }
+
     const QJsonArray clip = root.value("clipPlane").toArray();
     if (clip.size() == 4) {
         m_rhiWidget->setClippingPlane(
@@ -1447,6 +1515,7 @@ bool MainWindow::applySceneState(const QJsonObject& root, QString* errorMessage)
     }
     m_committedParams = m_meshParams;
     m_undoStack->clear();
+    m_rhiWidget->recordViewState();
     refreshObjectList();
     return true;
 }
@@ -1543,22 +1612,178 @@ void MainWindow::onSyncTick() {
     }
 }
 
-void MainWindow::onScriptConsole() {
-    if (!m_scriptConsole) {
-        m_scriptConsole = new ScriptConsole(m_rhiWidget, this);
+void MainWindow::ensureCollabSession() {
+    if (m_collab) {
+        return;
     }
-    m_scriptConsole->setView(m_rhiWidget);
-    m_scriptConsole->show();
+
+    m_collab = new CollabSession(this);
+    connect(m_collab, &CollabSession::sceneStateReceived, this,
+            &MainWindow::handleRemoteSceneState);
+    connect(m_collab, &CollabSession::statusChanged, this,
+            [this](const QString& text) {
+                statusBar()->showMessage(text, 5000);
+            });
+    // 新成员加入时强制广播一次完整场景
+    connect(m_collab, &CollabSession::peerChanged, this, [this]() {
+        m_lastNetHash.clear();
+    });
+
+    m_netTimer = new QTimer(this);
+    m_netTimer->setInterval(300);
+    connect(m_netTimer, &QTimer::timeout, this, &MainWindow::onNetTick);
+}
+
+bool MainWindow::hostCollabSession(quint16 port) {
+    ensureCollabSession();
+    m_lastNetHash.clear();
+    const bool ok = m_collab->host(port);
+    if (ok) {
+        m_netTimer->start();
+    }
+    return ok;
+}
+
+bool MainWindow::joinCollabSession(const QString& host, quint16 port) {
+    ensureCollabSession();
+    m_lastNetHash.clear();
+    const bool ok = m_collab->join(host, port);
+    if (ok) {
+        m_netTimer->start();
+    }
+    return ok;
+}
+
+void MainWindow::disconnectCollabSession() {
+    if (m_netTimer) {
+        m_netTimer->stop();
+    }
+    if (m_collab) {
+        m_collab->disconnectSession();
+    }
+    m_lastNetHash.clear();
+    statusBar()->showMessage("Collaboration disconnected", 3000);
+}
+
+void MainWindow::onHostSession() {
+    bool ok = false;
+    const int port = QInputDialog::getInt(this, "Host Collaboration",
+                                          "Listen port:", 45454, 1, 65535, 1,
+                                          &ok);
+    if (!ok) {
+        return;
+    }
+    if (hostCollabSession(quint16(port))) {
+        statusBar()->showMessage(
+            QString("Hosting collaboration on port %1").arg(port), 5000);
+    } else {
+        QMessageBox::warning(this, "Collaboration",
+                             "Failed to listen on the selected port.");
+    }
+}
+
+void MainWindow::onJoinSession() {
+    bool ok = false;
+    const QString address = QInputDialog::getText(
+        this, "Join Collaboration", "Host:port", QLineEdit::Normal,
+        "127.0.0.1:45454", &ok);
+    if (!ok || address.trimmed().isEmpty()) {
+        return;
+    }
+
+    const int separator = address.lastIndexOf(':');
+    if (separator <= 0 || separator + 1 >= address.size()) {
+        QMessageBox::warning(this, "Collaboration",
+                             "Use the form host:port.");
+        return;
+    }
+
+    const QString host = address.left(separator).trimmed();
+    const quint16 port = quint16(address.mid(separator + 1).toUInt());
+    if (port == 0) {
+        QMessageBox::warning(this, "Collaboration", "Invalid port.");
+        return;
+    }
+
+    if (joinCollabSession(host, port)) {
+        statusBar()->showMessage(
+            QString("Joining collaboration at %1:%2").arg(host).arg(port),
+            5000);
+    }
+}
+
+void MainWindow::onNetTick() {
+    if (!m_collab || !m_collab->isActive() || !m_rhiWidget) {
+        return;
+    }
+
+    const QJsonObject state = captureSceneState();
+    const QByteArray data =
+        QJsonDocument(state).toJson(QJsonDocument::Compact);
+    const QByteArray hash =
+        QCryptographicHash::hash(data, QCryptographicHash::Sha1);
+    if (hash == m_lastNetHash) {
+        return;
+    }
+
+    m_lastNetHash = hash;
+    m_collab->sendState(state);
+}
+
+void MainWindow::handleRemoteSceneState(const QJsonObject& state) {
+    if (!m_rhiWidget) {
+        return;
+    }
+
+    const QByteArray data =
+        QJsonDocument(state).toJson(QJsonDocument::Compact);
+    const QByteArray hash =
+        QCryptographicHash::hash(data, QCryptographicHash::Sha1);
+    if (hash == m_lastNetHash) {
+        return;   // 自己广播的循环回包
+    }
+
+    QString error;
+    if (!applySceneState(state, &error)) {
+        statusBar()->showMessage(
+            error.isEmpty() ? "Invalid remote scene state" : error, 4000);
+        return;
+    }
+
+    // 以应用后的本地状态为基准，避免回传造成乒乓
+    m_lastNetHash = QCryptographicHash::hash(
+        QJsonDocument(captureSceneState()).toJson(QJsonDocument::Compact),
+        QCryptographicHash::Sha1);
+    statusBar()->showMessage("Remote scene applied", 2000);
+}
+
+void MainWindow::onScriptConsole() {
+    ensureScriptConsole()->show();
     m_scriptConsole->raise();
     m_scriptConsole->activateWindow();
 }
 
-bool MainWindow::runScriptFile(const QString& path) {
+ScriptConsole* MainWindow::ensureScriptConsole() {
     if (!m_scriptConsole) {
         m_scriptConsole = new ScriptConsole(m_rhiWidget, this);
     }
     m_scriptConsole->setView(m_rhiWidget);
-    return m_scriptConsole->runFile(path);
+    return m_scriptConsole;
+}
+
+bool MainWindow::runScriptFile(const QString& path) {
+    return ensureScriptConsole()->runFile(path);
+}
+
+void MainWindow::loadNativePlugins() {
+    if (!m_nativePlugins) {
+        m_nativePlugins = new PluginManager(this);
+    }
+    ScriptConsole* console = ensureScriptConsole();
+    const int count = m_nativePlugins->loadAll(console->api());
+    if (count > 0 || !m_nativePlugins->failedPlugins().isEmpty()) {
+        statusBar()->showMessage(m_nativePlugins->statusText(), 4000);
+    }
 }
 
 void MainWindow::loadPlugins() {

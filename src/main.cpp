@@ -76,6 +76,10 @@ int main(int argc, char* argv[]) {
                                        "Export scene state JSON and continue.", "file");
   QCommandLineOption sceneImportOption("scene-import",
                                        "Import scene state JSON after load.", "file");
+  QCommandLineOption collabHostOption("collab-host",
+                                      "Host a collaboration session on a port.", "port");
+  QCommandLineOption collabJoinOption("collab-join",
+                                      "Join a collaboration session (host:port).", "address");
 
   parser.addOption(modelOption);
   parser.addOption(surfaceOption);
@@ -101,6 +105,8 @@ int main(int argc, char* argv[]) {
   parser.addOption(scriptOption);
   parser.addOption(sceneExportOption);
   parser.addOption(sceneImportOption);
+  parser.addOption(collabHostOption);
+  parser.addOption(collabJoinOption);
   parser.process(app);
 
   MainWindow window;
@@ -147,6 +153,24 @@ int main(int argc, char* argv[]) {
   }
   if (parser.isSet(aoOption)) {
     window.setAoEnabled(true);
+  }
+  if (parser.isSet(collabHostOption)) {
+    bool ok = false;
+    const int port = parser.value(collabHostOption).toInt(&ok);
+    if (ok && port > 0 && port <= 65535) {
+      window.hostCollabSession(quint16(port));
+    }
+  }
+  if (parser.isSet(collabJoinOption)) {
+    const QString address = parser.value(collabJoinOption);
+    const int separator = address.lastIndexOf(':');
+    if (separator > 0) {
+      const QString host = address.left(separator);
+      const quint16 port = quint16(address.mid(separator + 1).toUInt());
+      if (port != 0) {
+        window.joinCollabSession(host, port);
+      }
+    }
   }
 
   // 需要模型/曲面加载完成后再执行
@@ -230,8 +254,12 @@ int main(int argc, char* argv[]) {
     if (parser.isSet(screenshotOption)) {
       QObject::connect(
           &window, &MainWindow::modelLoaded, &window,
-          [captureAndQuit]() {
-            QTimer::singleShot(600, qApp, [captureAndQuit]() { captureAndQuit(); });
+          [captureAndQuit, &delayOption, &parser]() {
+            const int delay = parser.isSet(delayOption)
+                                  ? qMax(100, parser.value(delayOption).toInt())
+                                  : 600;
+            QTimer::singleShot(delay, qApp,
+                               [captureAndQuit]() { captureAndQuit(); });
           });
     }
     if (parser.isSet(exportOption)) {

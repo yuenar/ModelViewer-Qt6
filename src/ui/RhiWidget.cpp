@@ -104,6 +104,36 @@ RhiWidget::RhiWidget(QWidget* parent)
     m_animTimer->setInterval(16);
     connect(m_animTimer, &QTimer::timeout, this, &RhiWidget::advanceAnimation);
 
+    m_viewRecordTimer = new QTimer(this);
+    m_viewRecordTimer->setSingleShot(true);
+    m_viewRecordTimer->setInterval(250);
+    connect(m_viewRecordTimer, &QTimer::timeout, this,
+            &RhiWidget::recordViewState);
+
+    m_viewAnimTimer = new QTimer(this);
+    m_viewAnimTimer->setInterval(16);
+    connect(m_viewAnimTimer, &QTimer::timeout, this, [this]() {
+        const float t = qBound(
+            0.0f, float(m_viewAnimClock.elapsed()) / 320.0f, 1.0f);
+        const float s = t * t * (3.0f - 2.0f * t);
+        m_camera.setPosition(m_viewAnimFrom.eye * (1.0f - s) +
+                             m_viewAnimTo.eye * s);
+        m_camera.setTarget(m_viewAnimFrom.target * (1.0f - s) +
+                           m_viewAnimTo.target * s);
+        m_camera.setUp((m_viewAnimFrom.up * (1.0f - s) +
+                        m_viewAnimTo.up * s)
+                           .normalized());
+        if (t >= 1.0f) {
+            m_camera.setPosition(m_viewAnimTo.eye);
+            m_camera.setTarget(m_viewAnimTo.target);
+            m_camera.setUp(m_viewAnimTo.up);
+            m_viewAnimTimer->stop();
+            m_viewAnimating = false;
+            emit viewHistoryChanged();
+        }
+        update();
+    });
+
     updateCursorForTool();
 }
 
@@ -240,6 +270,9 @@ void RhiWidget::setCPUMeshes(const QVector<CpuMesh>& meshes, const QString& labe
     }
 
     m_camera.fitToView(m_sceneBbox);
+    m_viewHistory.clear();
+    m_viewHistoryIndex = -1;
+    recordViewState();
 
     if (m_renderer) {
         m_renderer->resetMeshUploadFlag();
@@ -520,6 +553,7 @@ void RhiWidget::setBackgroundColors(const QVector3D& topColor,
 void RhiWidget::fitToView() {
     if (!m_sceneBbox.isEmpty()) {
         m_camera.fitToView(m_sceneBbox);
+        recordViewState();
         update();
     }
 }
@@ -529,6 +563,7 @@ void RhiWidget::applyViewPreset(int preset) {
         return;
     }
     m_camera.setViewPreset(preset, m_sceneBbox);
+    recordViewState();
     update();
 }
 
@@ -815,6 +850,20 @@ void RhiWidget::applyAnimationTime(float time) {
         if (!mesh) {
             continue;
         }
+
+        if (mesh->isSkinned()) {
+            // 骨骼蒙皮：把动画通道转换为骨骼局部姿态
+            QHash<QString, QMatrix4x4> poses;
+            poses.reserve(channels.size());
+            for (auto it = channels.constBegin(); it != channels.constEnd();
+                 ++it) {
+                poses.insert(it.key(), it.value()->sample(time));
+            }
+            mesh->applyBonePoses(poses);
+            changed = true;
+            continue;
+        }
+
         const CpuMesh& base = mesh->baseMesh();
         if (base.nodePath.isEmpty()) {
             continue;
@@ -843,7 +892,13 @@ void RhiWidget::applyAnimationTime(float time) {
 void RhiWidget::resetAnimationDeltas() {
     bool changed = false;
     for (RhiMesh* mesh : m_meshes) {
-        if (mesh && !mesh->animationDelta().isIdentity()) {
+        if (!mesh) {
+            continue;
+        }
+        if (mesh->isSkinned()) {
+            mesh->resetSkinPose();
+            changed = true;
+        } else if (!mesh->animationDelta().isIdentity()) {
             mesh->setAnimationDelta(QMatrix4x4());
             changed = true;
         }
@@ -852,6 +907,74 @@ void RhiWidget::resetAnimationDeltas() {
         m_renderer->resetMeshUploadFlag();
     }
     update();
+}
+
+RhiWidget::ViewState RhiWidget::currentViewState() const {
+    ViewState state;
+    state.eye = m_camera.position();
+    state.target = m_camera.target();
+    state.up = m_camera.upDirection();
+    return state;
+}
+
+bool RhiWidget::viewStateNear(const ViewState& a, const ViewState& b) const {
+    const float epsilon = 1e-4f;
+    return (a.eye - b.eye).lengthSquared() < epsilon &&
+           (a.target - b.target).lengthSquared() < epsilon &&
+           (a.up - b.up).lengthSquared() < epsilon;
+}
+
+void RhiWidget::recordViewState() {
+    if (m_viewAnimating) {
+        return;
+    }
+
+    const ViewState state = currentViewState();
+    if (m_viewHistoryIndex >= 0 &&
+        m_viewHistoryIndex < m_viewHistory.size() &&
+        viewStateNear(m_viewHistory[m_viewHistoryIndex], state)) {
+        return;
+    }
+
+    // 丢弃当前位置之后的前进记录
+    while (m_viewHistory.size() > m_viewHistoryIndex + 1) {
+        m_viewHistory.removeLast();
+    }
+
+    m_viewHistory.append(state);
+    if (m_viewHistory.size() > 32) {
+        m_viewHistory.removeFirst();
+    }
+    m_viewHistoryIndex = m_viewHistory.size() - 1;
+    emit viewHistoryChanged();
+}
+
+void RhiWidget::goBack() {
+    if (!canGoBack()) {
+        return;
+    }
+    --m_viewHistoryIndex;
+    animateToViewState(m_viewHistory[m_viewHistoryIndex]);
+    emit viewHistoryChanged();
+}
+
+void RhiWidget::goForward() {
+    if (!canGoForward()) {
+        return;
+    }
+    ++m_viewHistoryIndex;
+    animateToViewState(m_viewHistory[m_viewHistoryIndex]);
+    emit viewHistoryChanged();
+}
+
+void RhiWidget::animateToViewState(const ViewState& state) {
+    m_viewAnimFrom = currentViewState();
+    m_viewAnimTo = state;
+    m_viewAnimating = true;
+    m_viewAnimClock.restart();
+    if (m_viewAnimTimer) {
+        m_viewAnimTimer->start();
+    }
 }
 
 QVector3D RhiWidget::unproject(const QPoint& pos, float ndcZ) const {
@@ -992,12 +1115,18 @@ void RhiWidget::mouseReleaseEvent(QMouseEvent* e) {
         emit meshesChanged();
         update();
     }
+    if (m_dragged) {
+        recordViewState();
+    }
     m_activeButton = Qt::NoButton;
     m_dragged = false;
 }
 
 void RhiWidget::wheelEvent(QWheelEvent* e) {
     m_camera.zoom(e->angleDelta().y() / 120.0f);
+    if (m_viewRecordTimer) {
+        m_viewRecordTimer->start();
+    }
     update();
 }
 

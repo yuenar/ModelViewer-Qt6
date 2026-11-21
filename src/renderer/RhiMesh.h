@@ -17,6 +17,7 @@
 
 #include <rhi/qrhi.h>
 #include <QMatrix4x4>
+#include <QHash>
 #include <QString>
 #include <QVector>
 #include "../core/CpuMesh.h"
@@ -126,6 +127,15 @@ class RhiMesh {
   void setAnimationDelta(const QMatrix4x4& delta);
   QMatrix4x4 animationDelta() const { return m_animDelta; }
 
+  /// @brief 是否为骨骼蒙皮网格
+  bool isSkinned() const { return m_skinned; }
+
+  /// @brief 应用骨骼姿态（骨骼名 -> 局部变换），并重新计算蒙皮顶点
+  void applyBonePoses(const QHash<QString, QMatrix4x4>& poses);
+
+  /// @brief 恢复绑定姿态
+  void resetSkinPose();
+
   /// @brief 复制该对象（共享原始几何，独立的 GPU 资源与变换）
   RhiMesh* clone() const;
 
@@ -137,7 +147,10 @@ class RhiMesh {
   void buildNormalLines();
   void buildLodIndices(int level, int cells);
   void rebuildDerivedData();
-  void rebuildCpuData();
+  void rebuildCpuData(bool updateDerived = true);
+  void initSkinData(const CpuMesh& cpu);
+  void updateBoneMatrices(const QHash<QString, QMatrix4x4>* poses);
+  void skinVertices();
 
   QRhiBuffer* createBuffer(QRhiResourceUpdateBatch* batch,
                            QRhiBuffer::UsageFlag usage, const void* data,
@@ -177,6 +190,17 @@ class RhiMesh {
 
   QVector3D m_center;
   float m_radius = 0.0f;
+
+  // ── 骨骼蒙皮数据 ─────────────────────────────────────────
+  bool m_skinned = false;
+  QVector<CpuMesh::SkinVertex> m_skinWeights;
+  QVector<QString> m_boneNames;
+  QVector<QMatrix4x4> m_boneOffsets;
+  QVector<QMatrix4x4> m_boneBindMatrices;
+  QVector<QVector<QString>> m_bonePaths;
+  QVector<QVector<QMatrix4x4>> m_boneRestLocals;
+  QVector<QMatrix4x4> m_boneMatrices;
+  QVector<QMatrix4x4> m_boneNormalMatrices;
 
   int m_indexCount = 0;
   int m_lineIndexCount = 0;

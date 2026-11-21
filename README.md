@@ -59,13 +59,16 @@ Additional implemented features:
 - MSAA (2x/4x/8x), FXAA and depth-based AO post-processing
 - Frustum culling, distance LOD (vertex clustering), GPU buffer pool,
   shared-material batching, render statistics in the HUD
-- Node keyframe animation (play/pause/stop/time scrub)
+- Node keyframe animation and skeletal skinning (weights + inverse bind matrices)
+- View history with smooth camera transitions (Alt+Left / Alt+Right)
 - QJSEngine script console and `plugins/*.js` auto-loading
+- C++ ABI plugins (`ModelViewerPlugin` + demo plugin in `plugins_src/`)
 - Scene state JSON export/import and shared-file local collaboration sync
+- LAN real-time collaboration over TCP (`--collab-host`, `--collab-join`)
 - Command-line automation flags (`--help`)
 
-Long-term items not implemented: skeletal skinning, network collaboration,
-C++ ABI plugins, view transition history.
+Long-term items not implemented: GPU skinning, authenticated/conflict-merged
+network collaboration, shader/tool editors.
 
 ### Rendering Effects Gallery
 
@@ -243,10 +246,14 @@ cmake --build . --config Release
   Rename `F2`, Delete `Del`)
 - **Script Console**: Tools → Script Console; `viewer.*` API and `console.log()`.
   JavaScript files in `plugins/` next to the executable auto-load.
+- **C++ Plugins**: drop plugin DLLs into `plugins/`; a demo plugin is built
+  from `plugins_src/DemoPlugin`.
 - **Collaboration**: Tools → Collaboration (export/import scene JSON,
-  local shared-file sync)
+  local shared-file sync, or host/join a TCP session)
+- **View History**: View → View History (Back / Forward, Alt+Left / Alt+Right)
 - **Automation flags**: `--msaa`, `--fxaa`, `--ao`, `--animate`, `--anim-time`,
-  `--script`, `--scene-export`, `--scene-import`, `--stats`
+  `--script`, `--scene-export`, `--scene-import`, `--collab-host`,
+  `--collab-join`, `--stats`
 
 #### Keyboard Shortcuts
 - `Space`: Reset view, `F`: Fit to view
@@ -257,6 +264,7 @@ cmake --build . --config Release
 - `Ctrl+T` / `Ctrl+W`: New / close tab, `Ctrl+Z` / `Ctrl+Y`: Undo / redo
 - `Ctrl+D` / `F2` / `Del`: Duplicate / rename / delete object
 - `Ctrl+P`: Play/pause animation
+- `Alt+Left` / `Alt+Right`: View history back / forward
 - `F11`: Fullscreen
 
 ### Development Guide
@@ -407,12 +415,15 @@ PBR（Cook-Torrance + metallic/roughness）、阴影映射（比较采样器 + 3
 - 裁剪平面剖面的封盖几何
 - MSAA（2x/4x/8x）、FXAA、基于深度的 AO 后处理
 - 视锥剔除、距离 LOD（顶点聚类）、GPU 缓冲池、同材质批处理、HUD 渲染统计
-- 节点关键帧动画（播放/暂停/停止/时间定位）
+- 节点关键帧动画与骨骼蒙皮（权重 + 逆绑定矩阵）
+- 视图历史与平滑相机过渡（Alt+← / Alt+→）
 - QJSEngine 脚本控制台与 `plugins/*.js` 自动加载
+- C++ ABI 插件（`ModelViewerPlugin` 接口 + `plugins_src/` 示例插件）
 - 场景状态 JSON 导入/导出与共享文件本地协作同步
+- 基于 TCP 的局域网实时协作（`--collab-host`、`--collab-join`）
 - 命令行自动化参数（`--help`）
 
-长期项中仍未实现：骨骼蒙皮、网络实时协作、C++ ABI 插件、视图历史过渡。
+长期项中仍未实现：GPU 蒙皮、带鉴权/冲突合并的网络协作、着色器/工具编辑器。
 
 ### 渲染效果展示
 
@@ -571,9 +582,13 @@ make -j$(nproc)
 - **模型编辑**：编辑菜单或对象面板（复制 `Ctrl+D`、重命名 `F2`、删除 `Del`）
 - **脚本控制台**：工具 → Script Console，使用 `viewer.*` API 与
   `console.log()`；可执行文件旁 `plugins/` 内的 `.js` 会自动加载
-- **协作**：工具 → Collaboration（场景 JSON 导入/导出、共享文件本地同步）
+- **C++ 插件**：将插件 DLL 放入 `plugins/`；`plugins_src/DemoPlugin` 提供示例插件
+- **协作**：工具 → Collaboration（场景 JSON 导入/导出、共享文件本地同步、
+  TCP 主机/加入会话）
+- **视图历史**：视图 → View History（Back / Forward，Alt+← / Alt+→）
 - **自动化参数**：`--msaa`、`--fxaa`、`--ao`、`--animate`、`--anim-time`、
-  `--script`、`--scene-export`、`--scene-import`、`--stats`
+  `--script`、`--scene-export`、`--scene-import`、`--collab-host`、
+  `--collab-join`、`--stats`
 
 ### 快捷键
 - `Space`：重置视图，`F`：适配视图
@@ -584,6 +599,7 @@ make -j$(nproc)
 - `Ctrl+T` / `Ctrl+W`：新建/关闭标签页，`Ctrl+Z` / `Ctrl+Y`：撤销/重做
 - `Ctrl+D` / `F2` / `Del`：复制 / 重命名 / 删除对象
 - `Ctrl+P`：播放/暂停动画
+- `Alt+←` / `Alt+→`：视图历史后退 / 前进
 - `F11`：全屏模式
 
 ## 开发指南

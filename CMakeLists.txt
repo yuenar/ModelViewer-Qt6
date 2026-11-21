@@ -34,9 +34,10 @@ elseif(APPLE)
 endif()
 
 # ── 依赖 ────────────────────────────────────────────────────────────
-find_package(Qt6 6.9 REQUIRED COMPONENTS Core Gui Widgets Concurrent ShaderTools GuiPrivate Qml)
+find_package(Qt6 6.9 REQUIRED COMPONENTS Core Gui Widgets Concurrent ShaderTools GuiPrivate Qml Network)
 find_package(assimp CONFIG REQUIRED)
 
 qt_standard_project_setup()
 
 add_subdirectory(src)
+add_subdirectory(plugins_src/DemoPlugin)

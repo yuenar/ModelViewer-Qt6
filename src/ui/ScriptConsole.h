@@ -56,6 +56,9 @@ class ViewerScriptApi : public QObject {
   Q_INVOKABLE void setPostProcessing(bool fxaa, bool ao);
   Q_INVOKABLE void viewPreset(int preset);
   Q_INVOKABLE void fitView();
+  Q_INVOKABLE void viewBack();
+  Q_INVOKABLE void viewForward();
+  Q_INVOKABLE int viewHistorySize() const;
 
   Q_INVOKABLE void setMeshColor(int index, double r, double g, double b);
   Q_INVOKABLE void setMeshTransform(int index, double tx, double ty, double tz,
@@ -100,6 +103,7 @@ class ScriptConsole : public QDialog {
   explicit ScriptConsole(RhiWidget* view, QWidget* parent = nullptr);
 
   void setView(RhiWidget* view);
+  ViewerScriptApi* api() const { return m_api; }
 
   /// @brief 执行一段脚本，错误/返回值输出到控制台
   bool runScript(const QString& code, const QString& label = "script");
