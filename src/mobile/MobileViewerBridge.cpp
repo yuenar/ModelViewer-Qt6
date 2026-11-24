@@ -18,6 +18,7 @@
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
+#include <QFutureWatcher>
 #include <QGuiApplication>
 #include <QImage>
 #include <QStandardPaths>
@@ -267,7 +268,8 @@ void MobileViewerBridge::rotateAt(qreal x, qreal y, qreal viewportW,
   if (!m_rotating || viewportW <= 0 || viewportH <= 0) {
     return;
   }
-  const QPoint current(int(x), int(y));
+  // 注意：必须用花括号初始化，圆括号会被解析成函数声明
+  const QPoint current{int(x), int(y)};
   m_camera.rotate(m_lastRotatePoint, current,
                   QSize(int(viewportW), int(viewportH)));
   m_lastRotatePoint = current;

@@ -25,6 +25,10 @@
 /// SAF 的 OPEN_DOCUMENT 不需要任何存储权限（对应 android/
 /// AndroidManifest.xml 未声明 READ_EXTERNAL_STORAGE）。
 
+// 注意：Q_OS_ANDROID 由 qglobal.h 定义，必须在下面的 #if 之前引入，
+// 否则条件永远为假，整个文件被预处理掉（导致 pickModel 链接未定义）。
+#include <QtCore/qglobal.h>
+
 #if defined(Q_OS_ANDROID)
 
 #include "MobileFileHelper.h"

@@ -57,6 +57,14 @@ if(ANDROID)
     file(GLOB_RECURSE MOBILE_BRIDGE_SOURCES
         "mobile/*.cpp" "mobile/*.h")
 
+    # Android 部署要求产物文件名严格为 lib<target>_<abi>.so：
+    # androiddeployqt 用 application-binary（= 目标名）拼出该文件名，去
+    # android-build-*/libs/<abi>/ 下查找。如果 Debug 构建带后缀 d，
+    # 实际产物是 libModelViewerd_arm64-v8a.so，就会报
+    # "Cannot find application binary in build dir ..."。
+    # 这里强制置空（覆盖缓存里的 d），必须在 qt_add_executable 之前。
+    set(CMAKE_DEBUG_POSTFIX "" CACHE STRING "Debug 产物后缀（Android 必须为空）" FORCE)
+
     qt_add_executable(ModelViewer
         main_mobile.cpp
         ${MOBILE_PORTABLE_SOURCES}
@@ -65,9 +73,20 @@ if(ANDROID)
 
     # QML 模块（C++ 类型 RhiView / 单例 ViewerBridge / FileHelper
     # 在 main_mobile.cpp 中手动注册到同一 URI）
+    #
+    # RESOURCE_PREFIX 必须显式写成 /qt/qml：
+    # 本工程 cmake_minimum_required 是 3.21，QTP0001 策略停留在 OLD，
+    # qt_add_qml_module 默认把资源前缀取成 "/"，于是 MobileViewer.qml 落在
+    #   :/ModelViewer/qml/MobileViewer.qml
+    # 而 main_mobile.cpp 里加载的是 Qt 6 标准布局
+    #   qrc:/qt/qml/ModelViewer/qml/MobileViewer.qml
+    # → 运行时报 "QQmlApplicationEngine failed to load component ...
+    #   No such file or directory"。写成 /qt/qml 后两者一致，同时
+    # qmldir 也落在默认导入路径 :/qt/qml 下，"import ModelViewer" 可正常解析。
     qt_add_qml_module(ModelViewer
         URI "ModelViewer"
         VERSION 1.0
+        RESOURCE_PREFIX "/qt/qml"
         QML_FILES
             qml/MobileViewer.qml
             qml/ViewerToolBar.qml
@@ -116,11 +135,14 @@ if(ANDROID)
         assimp::assimp
     )
 
-    # 移动端同样可选 OpenMP（NDK clang 提供 libomp）
-    find_package(OpenMP QUIET)
-    if(OpenMP_CXX_FOUND)
-        target_link_libraries(ModelViewer PRIVATE OpenMP::OpenMP_CXX)
-    endif()
+    # 移动端不再链接 OpenMP：源码里没有任何 #pragma omp（全仓库 grep 为空），
+    # 而 NDK clang 的 libomp.so 位于 toolchains/llvm/prebuilt/*/lib/clang/<ver>
+    # 目录，androiddeployqt 不会把它打进 APK，导致运行时：
+    #   UnsatisfiedLinkError: dlopen failed: library "libomp.so" not found
+    #   needed by libModelViewer_arm64-v8a.so
+    # 若以后真的要并行化，必须同时把 libomp.so 加入打包：
+    #   set_target_properties(ModelViewer PROPERTIES
+    #       QT_ANDROID_EXTRA_LIBS "${OpenMP_omp_LIBRARY}")
 
     # 移动端不需要：桌面光标资源、POST_BUILD 着色器拷贝（运行时
     # 着色器编辑是桌面 ShaderEditor 的功能）

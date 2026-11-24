@@ -26,6 +26,15 @@
 #include <QQmlApplicationEngine>
 #include <QQuickStyle>
 #include <QUrl>
+#include <QGuiApplication>
+#include <QCoreApplication>
+#include <QQuickView>
+#include <QQuickWindow>
+#include <QSGRendererInterface>
+#include <QScreen>
+#include <QRect>
+#include <QSize>
+#include <QSurfaceFormat>
 
 #include "mobile/MobileViewerBridge.h"
 #include "mobile/MobileFileHelper.h"
@@ -35,7 +44,28 @@ int main(int argc, char* argv[]) {
 #if defined(Q_OS_ANDROID)
     // 移动端固定 GLES 3.1 后端；如需试验 Vulkan 可注释本行
     // （着色器需相应补 Vulkan/SPIR-V 变体）
-    qputenv("QSG_RHI_BACKEND", "opengles");
+    // ── 渲染后端 ────────────────────────────────────────────────
+    // Android 统一走 OpenGL ES（Vulkan 需要额外扩展，本项目用不到）。
+    // 🔴 不要再写 qputenv("QT_OPENGL", "es2")：那是桌面 QT_OPENGL 变量的
+    //    历史取值，Android 平台插件根本不读它，写在这儿只会误导后来者。
+    //    Qt 官方推荐的声明方式是 QSurfaceFormat：指定 RenderableType=OpenGLES
+    //    + 版本，Android 平台插件据此创建 EGL 上下文（驱动支持更高版本时
+    //    会给出 ES 3.2，这里只保证下限）。
+    qputenv("QSG_RHI_BACKEND", "opengl");
+
+    QSurfaceFormat esFormat;
+    esFormat.setRenderableType(QSurfaceFormat::OpenGLES);
+    esFormat.setVersion(3, 1);                    // 自绘 QSG 节点/着色器的下限
+    esFormat.setDepthBufferSize(24);
+    esFormat.setStencilBufferSize(8);
+    esFormat.setSwapBehavior(QSurfaceFormat::DoubleBuffer);
+    QSurfaceFormat::setDefaultFormat(esFormat);
+    // 帧级诊断（与桌面一致，靠环境变量开关，正式包不带）
+    if (!qEnvironmentVariableIsEmpty("MYSIC_QSG_TIMING")) {
+        qputenv("QSG_RENDER_TIMING", "1");
+        qputenv("QSG_INFO", "1");
+    }
+
 #endif
 
     QGuiApplication app(argc, argv);
