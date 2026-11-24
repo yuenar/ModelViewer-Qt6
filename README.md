@@ -10,7 +10,7 @@ A cross-platform 3D model viewer based on Qt6 RHI
 
 ### Project Overview
 
-ModelViewer-Qt6 is a modern 3D model viewer that leverages Qt6's RHI (Rendering Hardware Interface) framework for cross-platform hardware-accelerated rendering. It supports multiple 3D model formats and provides rich rendering modes and interactive features. **Fully compatible with macOS, Windows, and Linux systems.**
+ModelViewer-Qt6 is a modern 3D model viewer that leverages Qt6's RHI (Rendering Hardware Interface) framework for cross-platform hardware-accelerated rendering. It supports multiple 3D model formats and provides rich rendering modes and interactive features. **Fully compatible with macOS, Windows, and Linux systems, with an Android (arm64-v8a) application built from the same rendering core.**
 
 ![Rendering Screenshot](screenshots/Screenshot%2021-07-24%20172616.jpg)
 
@@ -22,6 +22,14 @@ ModelViewer-Qt6 is a modern 3D model viewer that leverages Qt6's RHI (Rendering 
 - **Hardware Acceleration**: Full GPU utilization for high-performance rendering
 - **Modern C++**: Uses C++17 standard and Google C++ coding conventions
 - **macOS Native Support**: Optimized for macOS with Metal backend support
+
+#### Android / Mobile
+- **Separate entry point**: `src/main_mobile.cpp` (QGuiApplication + Qt Quick); desktop keeps `src/main.cpp` + Qt Widgets
+- **QML UI**: `src/qml/` (main window, toolbar, gestures, model list, render-mode drawer); bridge objects `ViewerBridge` / `FileHelper`, 3D item `RhiView`
+- **Backend selection**: `SDK_INT > 31` → Vulkan, otherwise OpenGL ES 3.1 (set via `QSG_RHI_BACKEND` before `QGuiApplication` starts)
+- **File picking**: Android SAF `OPEN_DOCUMENT`; `content://` URIs are copied into app cache before Assimp loads them; recents persisted in `QSettings`
+- **Touch gestures**: single-finger rotate, two-finger pan/pinch zoom, double-tap fit, long-press pick; mouse still works for desktop debugging
+- iOS is **not implemented** in this iteration
 
 #### Rendering Modes
 - **Phong Shading**: Classic lighting model
@@ -126,13 +134,24 @@ ModelViewer-Qt6/
 │   │   ├── RhiMesh.cpp
 │   │   ├── RhiRenderer.h  # Main renderer
 │   │   └── RhiRenderer.cpp
-│   ├── ui/                 # User interface
+│   ├── ui/                 # Desktop UI (Qt Widgets; not built on Android)
 │   │   ├── MainWindow.h    # Main window
 │   │   ├── MainWindow.cpp
 │   │   ├── RhiWidget.h     # RHI rendering widget
 │   │   └── RhiWidget.cpp
-│   └── main.cpp           # Program entry point
-├── shaders/               # Shader files
+│   ├── net/ plugin/        # Desktop-only collaboration / script plugins
+│   ├── mobile/             # Android bridge layer
+│   │   ├── MobileViewerBridge.h/.cpp
+│   │   ├── MobileFileHelper.h/.cpp
+│   │   ├── MobileFileHelper_android.cpp
+│   │   └── MobileRhiItem.h/.cpp
+│   ├── qml/                # Android Qt Quick UI (5 QML files)
+│   ├── shaders/            # GLSL/HLSL/MSL shader sources
+│   ├── main.cpp            # Desktop entry point
+│   └── main_mobile.cpp     # Android entry point
+├── android/                # Android manifest + launcher icon
+├── scripts/                # build_android.ps1
+├── run.bat                 # adb launch + filtered logcat for Android
 ├── res/                  # Resource files
 ├── textures/              # Texture resources
 ├── fonts/                # Font files
@@ -222,6 +241,16 @@ cmake --build . --config Release
 ./ModelViewer
 ```
 
+##### Android (Qt Creator / Windows)
+- Install Qt 6.9+ for Android (`arm64-v8a`), Android SDK (platform 34), NDK and JDK 17.
+- Open the project with an Android kit and build/run the `ModelViewer_make_apk` target.
+- The APK is written to `src/android-build-ModelViewer/build/outputs/apk/debug/`; package id is
+  `org.qtproject.example.ModelViewer`, activity `org.qtproject.qt.android.bindings.QtActivity`.
+- `scripts/build_android.ps1` configures with `-DANDROID_PLATFORM=android-26` (its `--target apk`
+  line is stale for Qt 6.11 — use the generated `ModelViewer_make_apk` target instead).
+- Run `run.bat` to clear logcat, launch the app, lock onto its PID and stream only its logs.
+- Details and troubleshooting: `docs/ModelViewer-Qt6-移动端扩展文档.md`.
+
 ### Usage Guide
 
 #### Basic Operations
@@ -262,6 +291,8 @@ cmake --build . --config Release
 - **Automation flags**: `--msaa`, `--fxaa`, `--ao`, `--animate`, `--anim-time`,
   `--script`, `--scene-export`, `--scene-import`, `--collab-host`,
   `--collab-join`, `--stats`
+- **Desktop only**: script/shader/tool editors, C++ plugins and collaboration live in
+  `src/ui/`, `src/net/` and `src/plugin/` and are **not built on Android**
 
 #### Keyboard Shortcuts
 - `Space`: Reset view, `F`: Fit to view
@@ -328,6 +359,16 @@ cmake --build . --config Release
    - Check CMake configuration
    - Verify compiler version
 
+4. **Android runtime / packaging issues**
+   - `Cannot find application binary ... libModelViewer_arm64-v8a.so`: Debug postfix `d` must be
+     disabled (`CMAKE_DEBUG_POSTFIX ""`)
+   - `UnsatisfiedLinkError: libomp.so not found`: Android build must not link OpenMP
+   - `No such file or directory` when loading `MobileViewer.qml`: keep
+     `RESOURCE_PREFIX "/qt/qml"` in `qt_add_qml_module`
+   - `undefined symbol: MobileFileHelper::pickModel()`: include `<QtCore/qglobal.h>`
+     before the `Q_OS_ANDROID` guard in `MobileFileHelper_android.cpp`
+   - Use `run.bat` to see only the app process log (including native crash stacks)
+
 #### Debugging Tips
 - Use Qt Creator debugger
 - Enable RHI debug layer
@@ -378,7 +419,7 @@ If this project is helpful to you, please consider giving us a ⭐ Star!
 
 ## 项目简介
 
-ModelViewer-Qt6 是一个现代化的 3D 模型查看器，使用 Qt6 的 RHI（Rendering Hardware Interface）框架实现跨平台硬件加速渲染。支持多种 3D 模型格式，提供丰富的渲染模式和交互功能。
+ModelViewer-Qt6 是一个现代化的 3D 模型查看器，使用 Qt6 的 RHI（Rendering Hardware Interface）框架实现跨平台硬件加速渲染。支持多种 3D 模型格式，提供丰富的渲染模式和交互功能。桌面端支持 Windows / macOS / Linux，**Android（arm64-v8a）使用同一套渲染核心另有独立入口**。
 
 ![渲染效果截图](screenshots/Screenshot%2021-07-24%20172616.jpg)
 
@@ -389,6 +430,14 @@ ModelViewer-Qt6 是一个现代化的 3D 模型查看器，使用 Qt6 的 RHI（
 - **跨平台渲染**：通过 Qt RHI 支持 OpenGL、DirectX、Vulkan、Metal 等图形 API
 - **硬件加速**：充分利用 GPU 进行高性能渲染
 - **现代 C++**：使用 C++17 标准和 Google C++ 编码规范
+
+### Android / 移动端
+- **独立入口**：`src/main_mobile.cpp`（QGuiApplication + Qt Quick），桌面仍用 `src/main.cpp` + Qt Widgets
+- **QML 界面**：`src/qml/` 下 5 个 QML；桥接单例 `ViewerBridge` / `FileHelper`，3D 控件 `RhiView`
+- **后端选择**：`SDK_INT > 31` 用 Vulkan，否则 OpenGL ES 3.1；必须在 `QGuiApplication` 构造前写 `QSG_RHI_BACKEND`
+- **文件选择**：Android SAF `OPEN_DOCUMENT`，`content://` URI 先拷贝到应用 cache 再交给 Assimp；最近打开存 `QSettings`
+- **触摸手势**：单指旋转、双指平移/捏合缩放、双击适配、长按拾取；桌面调试鼠标同样可用
+- iOS 本轮**未实现**
 
 ### 渲染模式
 - **Phong 着色**：经典的光照模型
@@ -487,13 +536,24 @@ ModelViewer-Qt6/
 │   │   ├── RhiMesh.cpp
 │   │   ├── RhiRenderer.h  # 主渲染器
 │   │   └── RhiRenderer.cpp
-│   ├── ui/                 # 用户界面
+│   ├── ui/                 # 桌面 UI（Qt Widgets，Android 不编译）
 │   │   ├── MainWindow.h    # 主窗口
 │   │   ├── MainWindow.cpp
 │   │   ├── RhiWidget.h     # RHI 渲染控件
 │   │   └── RhiWidget.cpp
-│   └── main.cpp           # 程序入口
-├── shaders/               # 着色器文件
+│   ├── net/ plugin/        # 桌面协作会话 / 脚本插件（Android 不编译）
+│   ├── mobile/             # Android 桥接层
+│   │   ├── MobileViewerBridge.h/.cpp
+│   │   ├── MobileFileHelper.h/.cpp
+│   │   ├── MobileFileHelper_android.cpp
+│   │   └── MobileRhiItem.h/.cpp
+│   ├── qml/                # Android Qt Quick 界面（5 个 QML）
+│   ├── shaders/            # 着色器源码（460 / 310 es / HLSL 50 / MSL 12）
+│   ├── main.cpp           # 桌面入口
+│   └── main_mobile.cpp    # Android 入口
+├── android/               # AndroidManifest.xml + 图标
+├── scripts/               # build_android.ps1
+├── run.bat                # adb 启动 + 仅显示本进程日志
 ├── res/                  # 资源文件
 ├── textures/              # 纹理资源
 ├── fonts/                # 字体文件
@@ -566,6 +626,17 @@ cmake ..
 make -j$(nproc)
 ```
 
+#### Android（Qt Creator / Windows）
+- 需要 Qt 6.9+ for Android（arm64-v8a）、Android SDK（platform 34）、NDK、JDK 17。
+- 用 Android kit 打开工程，构建 `ModelViewer_make_apk` 目标；APK 位于
+  `src/android-build-ModelViewer/build/outputs/apk/debug/`。
+- 包名 `org.qtproject.example.ModelViewer`，入口 Activity
+  `org.qtproject.qt.android.bindings.QtActivity`。
+- `scripts/build_android.ps1` 用 `-DANDROID_PLATFORM=android-26` 配置；脚本里的
+  `--target apk` 对 Qt 6.11 已过时，以上面的目标名为准。
+- 运行根目录 `run.bat`：清日志 → 启动 → 锁定 PID → 只看本进程日志。
+- 完整实现说明与故障排查见 `docs/ModelViewer-Qt6-移动端扩展文档.md`。
+
 ## 使用指南
 
 ### 基本操作
@@ -602,6 +673,8 @@ make -j$(nproc)
 - **自动化参数**：`--msaa`、`--fxaa`、`--ao`、`--animate`、`--anim-time`、
   `--script`、`--shader`、`--scene-export`、`--scene-import`、`--collab-host`、
   `--collab-join`、`--collab-token`、`--stats`
+- **仅桌面**：脚本/着色器/工具编辑器、C++ 插件、协作功能位于 `src/ui/`、`src/net/`、
+  `src/plugin/`，Android 构建不编译
 
 ### 快捷键
 - `Space`：重置视图，`F`：适配视图
@@ -667,6 +740,16 @@ make -j$(nproc)
    - 确认依赖库版本
    - 检查 CMake 配置
    - 验证编译器版本
+
+4. **Android 运行 / 打包问题**
+   - `Cannot find application binary ... libModelViewer_arm64-v8a.so`：必须清空 Debug 后缀
+     （`CMAKE_DEBUG_POSTFIX ""`）
+   - `UnsatisfiedLinkError: libomp.so not found`：Android 端不要链接 OpenMP
+   - 加载 `MobileViewer.qml` 报 `No such file or directory`：`qt_add_qml_module` 必须显式
+     `RESOURCE_PREFIX "/qt/qml"`
+   - `undefined symbol: MobileFileHelper::pickModel()`：`MobileFileHelper_android.cpp` 在
+     `Q_OS_ANDROID` 守卫之前先包含 `<QtCore/qglobal.h>`
+   - 用 `run.bat` 只看本进程日志（包含原生崩溃栈）
 
 ### 调试技巧
 - 使用 Qt Creator 调试器

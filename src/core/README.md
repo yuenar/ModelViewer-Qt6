@@ -17,8 +17,21 @@ struct CpuMesh {
     };
     
     QVector<Vertex> vertices;  // 顶点数组
-    QVector<quint32> indices;  // 索引数组
-    BoundingBox bbox;         // 包围盒
+    QVector<quint32> indices;  // 索引数组（每 3 个索引一个三角形）
+    BoundingBox bbox;         // 包围盒（API 为 expand() / radius() / isEmpty()）
+    QString name;             // 网格名称
+    QVector3D baseColor;      // 材质基础色
+    QImage diffuseTexture;    // 漫反射贴图（移动端由渲染线程上传）
+    QString nodeName;         // 所属节点
+    QVector<QString> nodePath;            // 根 → 节点的名称链（节点动画用）
+    QVector<QMatrix4x4> nodeRestLocals;   // 与 nodePath 平行的静止局部变换
+    QMatrix4x4 restWorld;                 // 加载时烘焙到顶点的静止世界变换
+    QVector<SkinVertex> skinWeights;      // 每顶点最多 4 根骨骼的蒙皮权重
+    QVector<QString> boneNames;
+    QVector<QMatrix4x4> boneOffsets;
+    QVector<QMatrix4x4> boneBindMatrices;
+    QVector<QVector<QString>> bonePaths;
+    QVector<QVector<QMatrix4x4>> boneRestLocals;
 };
 ```
 
@@ -26,6 +39,7 @@ struct CpuMesh {
 - 支持位置、法线、纹理坐标的顶点格式
 - 使用索引缓冲区优化渲染性能
 - 内置包围盒用于快速碰撞检测和视锥剔除
+- 携带节点动画链与骨骼蒙皮数据，桌面/移动端共用同一套动画逻辑
 
 ### Light.h
 定义场景中的光照参数。
@@ -43,6 +57,15 @@ struct CpuMesh {
 - PBR 材质参数（金属度、粗糙度等）
 - 纹理绑定和采样参数
 
+### Animation.h/.cpp
+定义动画数据与加载结果：
+- `AnimationChannel` / `AnimationClip` - 节点关键帧与动画片段（名称、时长、通道）
+- `ModelAsset` - `ModelLoader::loadCPU()` 的返回类型，含 `QVector<CpuMesh> meshes` 与
+  `QVector<AnimationClip> animations`；移动端异步加载直接消费该结构
+
+### ParametricSurface.h/.cpp
+程序化生成 5 种演示曲面：平面、球体、圆环、圆柱、圆锥。移动端模型列表页通过该接口创建演示模型。
+
 ## 设计原则
 
 - **数据导向**：专注于数据结构定义，不包含业务逻辑
@@ -53,9 +76,11 @@ struct CpuMesh {
 ## 使用说明
 
 这些核心数据结构被其他模块广泛使用：
-- `loader` 模块将加载的模型数据填充到 `CpuMesh` 结构中
+- `loader` 模块将加载的模型数据填充到 `CpuMesh` 结构中，并返回 `ModelAsset`
 - `renderer` 模块将这些数据上传到 GPU 进行渲染
 - `ui` 模块使用这些结构进行参数编辑和显示
+- `mobile` 模块的 `MobileViewerBridge` 持有 `ModelAsset.meshes` / `.animations`，
+  并用 `CpuMesh::nodePath` / `skinWeights` 驱动节点动画与骨骼蒙皮
 
 ## 注意事项
 

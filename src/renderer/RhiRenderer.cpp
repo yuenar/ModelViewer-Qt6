@@ -557,6 +557,10 @@ void RhiRenderer::drawPost(QRhiCommandBuffer* cb) {
     }
     cb->setGraphicsPipeline(m_postPipeline);
     cb->setShaderResources(m_postSrb);
+    // 先管线后视口：同步 Vulkan 动态 scissor
+    const QSize targetSize = m_rt->pixelSize();
+    cb->setViewport({0, 0, float(targetSize.width()),
+                     float(targetSize.height())});
     const QRhiCommandBuffer::VertexInput binding(m_postVBuf, 0);
     cb->setVertexInput(0, 1, &binding);
     cb->draw(6);
@@ -1467,6 +1471,10 @@ void RhiRenderer::drawBackground(QRhiCommandBuffer* cb) {
     }
     cb->setGraphicsPipeline(m_bgPipeline);
     cb->setShaderResources(m_bgSrb);
+    // 先管线后视口：Vulkan 后端借此同步动态 scissor（见 renderShadowPass）
+    const QSize targetSize = m_rt->pixelSize();
+    cb->setViewport({0, 0, float(targetSize.width()),
+                     float(targetSize.height())});
     const QRhiCommandBuffer::VertexInput binding(m_bgVBuf, 0);
     cb->setVertexInput(0, 1, &binding);
     cb->draw(6);
@@ -1478,6 +1486,10 @@ void RhiRenderer::drawSkybox(QRhiCommandBuffer* cb) {
     }
     cb->setGraphicsPipeline(m_skyboxPipeline);
     cb->setShaderResources(m_skyboxSrb);
+    // 先管线后视口：同步 Vulkan 动态 scissor
+    const QSize targetSize = m_rt->pixelSize();
+    cb->setViewport({0, 0, float(targetSize.width()),
+                     float(targetSize.height())});
     const QRhiCommandBuffer::VertexInput binding(m_skyboxVBuf, 0);
     cb->setVertexInput(0, 1, &binding);
     cb->draw(36);
@@ -1551,8 +1563,10 @@ void RhiRenderer::renderShadowPass(QRhiCommandBuffer* cb,
     batch->updateDynamicBuffer(m_shadowUBO, 0, sizeof(shadowData), &shadowData);
 
     cb->beginPass(m_shadowRt, QColor(), QRhiDepthStencilClearValue(1.0f, 0), batch);
-    cb->setViewport({0, 0, 2048.0f, 2048.0f});
     cb->setGraphicsPipeline(m_shadowPipeline);
+    // 必须先绑管线再设视口：QRhi 的 Vulkan 后端只有在存在当前管线时才会
+    // 同步动态 scissor，否则整个 pass 的绘制都会被裁掉（只剩清屏色）。
+    cb->setViewport({0, 0, 2048.0f, 2048.0f});
 
     for (int i = 0; i < meshes.size(); ++i) {
         RhiMesh* mesh = meshes[i];
@@ -1681,8 +1695,11 @@ void RhiRenderer::render(QRhiCommandBuffer* cb,
     for (int i = 0; i < 4; ++i) {
         const Camera& camera = viewCameras[i < slotCount ? i : 0];
         const QMatrix4x4 view = camera.viewMatrix();
-        const QMatrix4x4 proj = m_rhi->clipSpaceCorrMatrix() *
-                                camera.projectionMatrix(aspect);
+        // 视锥剔除只依赖裁剪空间平面：这里必须用 GL 约定（-1..1 深度、
+        // Y 向上）的投影，与 Frustum::fromMatrix 的提取公式配套。
+        // 若把 clipSpaceCorrMatrix 乘进来（Vulkan/D3D 为 0..1 深度 + Y 翻转），
+        // 提取出的近/远平面会偏移，可能把可见模型误剔。
+        const QMatrix4x4 proj = camera.projectionMatrix(aspect);
         m_slotViewProj[i] = proj * view;
         m_slotEye[i] = camera.position();
         const float p11 = proj(1, 1);
@@ -1933,15 +1950,16 @@ void RhiRenderer::render(QRhiCommandBuffer* cb,
 
         cb->beginPass(m_rt, QColor(0, 0, 0), QRhiDepthStencilClearValue(1.0f, 0),
                       postBatch);
-        cb->setViewport({0, 0, width, height});
-        cb->setScissor({0, 0, int(width), int(height)});
+        // 视口由 drawPost 在绑定管线后设置（Vulkan 需要借此同步 scissor）
         drawPost(cb);
         cb->endPass();
     };
 
     cb->beginPass(sceneTarget, QColor(30, 30, 30),
                   QRhiDepthStencilClearValue(1.0f, 0), updates);
-    cb->setViewport({0, 0, width, height});
+    // 注意：这里不能先 setViewport——QRhi 的 Vulkan 后端只在已有当前管线时
+    // 才会同步动态 scissor，否则整个 pass 的 draw 都会被裁掉。视口统一由
+    // 第一个负责绘制的函数（drawBackground/drawSkybox）在绑定管线后设置。
 
     if (m_multiView) {
         drawBackground(cb);

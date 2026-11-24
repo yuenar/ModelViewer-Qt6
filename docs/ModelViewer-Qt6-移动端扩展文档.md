@@ -1,1183 +1,504 @@
-# ModelViewer-Qt6 移动端扩展文档
+# ModelViewer-Qt6 移动端扩展文档（按当前实现整理）
 
-> 基于 Qt6 RHI 的 Android / iOS 3D 模型查看器移动端适配方案
+> 本文不是设计方案，而是**从当前仓库实际代码反推的实现说明**。核对基准：2026-11-24。
+> 范围：桌面端继续沿用 `src/main.cpp` + Qt Widgets；移动端目前**只实现了 Android**，iOS 本轮未实现（根 `CMakeLists.txt` 里只有 `if(IOS) message(...)` 占位）。
 
 ---
 
 ## 目录
 
-- [一、架构总览](#一架构总览)
-- [二、移动端工程配置](#二移动端工程配置)
-- [三、移动端 UI 层设计](#三移动端-ui-层设计)
-- [四、触控交互系统](#四触控交互系统)
-- [五、模型文件管理](#五模型文件管理)
-- [六、渲染后端适配](#六渲染后端适配)
-- [七、性能优化策略](#七性能优化策略)
-- [八、平台原生集成](#八平台原生集成)
-- [九、CMake 构建配置](#九-cmake-构建配置)
+- [一、现状与能力边界](#一现状与能力边界)
+- [二、架构总览](#二架构总览)
+- [三、工程配置与构建](#三工程配置与构建)
+- [四、入口与 QML 类型注册](#四入口与-qml-类型注册)
+- [五、QML UI 层](#五qml-ui-层)
+- [六、触控交互](#六触控交互)
+- [七、模型加载与文件管理](#七模型加载与文件管理)
+- [八、渲染、截图与统计](#八渲染截图与统计)
+- [九、性能与后台策略](#九性能与后台策略)
+- [十、调试与故障排查](#十调试与故障排查)
+- [十一、与早期设计稿的差异 / 未实现项](#十一与早期设计稿的差异--未实现项)
+- [附录：实际目录结构](#附录实际目录结构)
 
 ---
 
-## 一、架构总览
+## 一、现状与能力边界
 
-### 1.1 移动端分层架构
+### 1.1 已实现
 
-原桌面版以 `MainWindow` + `RhiWidget` 作为 UI 宿主，移动端将 UI 层替换为 QML，核心渲染层(`RhiRenderer` / `RhiMesh` / `ModelLoader`)保持不变。
-
-```
-┌──────────────────────────────────────────┐
-│           QML 移动端 UI 层                │
-│  MobileViewer.qml  /  ToolBar.qml        │
-│  GestureArea.qml   /  ModelListPage.qml  │
-├──────────────────────────────────────────┤
-│           C++ 桥接层                      │
-│  MobileViewerBridge (QObject)            │
-│  MobileGestureHandler                   │
-│  MobileFileHelper                        │
-├──────────────────────────────────────────┤
-│           核心渲染层（原有，复用）          │
-│  RhiRenderer   RhiMesh   ModelLoader     │
-│  Camera        TrackBall BoundingBox     │
-├──────────────────────────────────────────┤
-│           Qt6 RHI 抽象层                  │
-│  Android → OpenGL ES 3.1                 │
-│  iOS     → Metal                         │
-└──────────────────────────────────────────┘
-```
-
-### 1.2 新增源文件列表
-
-| 文件路径 | 说明 |
+| 能力 | 实现位置 |
 |---|---|
-| `src/mobile/MobileViewerBridge.h/.cpp` | QML ↔ C++ 主桥接对象 |
-| `src/mobile/MobileGestureHandler.h/.cpp` | 触控手势 → Camera/TrackBall 转换 |
-| `src/mobile/MobileFileHelper.h/.cpp` | Android SAF / iOS UIDocumentPicker 封装 |
-| `src/mobile/MobileRhiItem.h/.cpp` | `QQuickRhiItem` 宿主，替代 `RhiWidget` |
-| `qml/MobileViewer.qml` | 主界面根组件 |
-| `qml/ViewerToolBar.qml` | 顶部工具栏 |
-| `qml/GestureArea.qml` | 手势捕获覆盖层 |
-| `qml/ModelListPage.qml` | 模型浏览/选择页 |
-| `qml/RenderModePanel.qml` | 渲染模式侧滑面板 |
-| `android/AndroidManifest.xml` | Android 权限与入口配置 |
-| `ios/Info.plist` | iOS 权限与文件类型声明 |
+| 独立 Android 入口（QGuiApplication + Qt Quick） | `src/main_mobile.cpp` |
+| QML 主界面、工具栏、手势层、模型列表、渲染面板 | `src/qml/*.qml`（5 个文件） |
+| QML ↔ C++ 桥接（场景状态、手势换算、异步加载、拾取、动画、截图请求） | `src/mobile/MobileViewerBridge.h/.cpp` |
+| `QQuickRhiItem` 3D 宿主 + 渲染线程快照 | `src/mobile/MobileRhiItem.h/.cpp` |
+| Android SAF 文件选择、`content://` → cache 拷贝、最近打开 | `src/mobile/MobileFileHelper_android.cpp` + `MobileFileHelper.cpp/.h` |
+| 桌面 / Android 双渲染后端（按 API 级别分流） | `src/main_mobile.cpp`、`android/AndroidManifest.xml` |
+| 12 种渲染模式 + 4 种显示风格 + 显示选项 | `RenderModePanel.qml` → `MobileViewerBridge` → 共用的 `RhiRenderer` |
+| 三角形级 CPU 射线拾取 | `MobileViewerBridge::pickMesh` / `pickObject` |
+| 异步 readback 截图（GLES 同步 / Vulkan 异步） | `MobileRhiItemRenderer::grabFrame` |
+| 后台暂停渲染、FPS/绘制统计 HUD、动画播放控制 | `MobileViewerBridge` + `MobileRhiItemRenderer` + `MobileViewer.qml` |
+
+### 1.2 不支持 / 本轮未做
+
+iOS（无 `Info.plist`、无 `MobileFileHelper_ios.mm`）、`MobileGestureHandler`、运行时纹理压缩格式选择、加载时自动面数简化、低电量自动降帧、独立 `normal_mobile.vert/frag` 着色器。详见[第十一章](#十一与早期设计稿的差异--未实现项)。
 
 ---
 
-## 二、移动端工程配置
+## 二、架构总览
 
-### 2.1 CMakeLists.txt 移动端节点
+### 2.1 分层结构
 
-在根 `CMakeLists.txt` 末尾添加移动端条件块：
+```
+┌──────────────────────────────────────────────┐
+│ QML UI（src/qml/）                            │
+│ MobileViewer.qml  ViewerToolBar.qml          │
+│ GestureArea.qml   ModelListPage.qml          │
+│ RenderModePanel.qml                          │
+├──────────────────────────────────────────────┤
+│ C++ 桥接层（src/mobile/，GUI 线程）           │
+│ MobileViewerBridge（QML 单例 ViewerBridge）  │
+│ MobileFileHelper（QML 单例 FileHelper）      │
+│ MobileRhiItem（QML 类型 RhiView）             │
+├──────────────────────────────────────────────┤
+│ 复用核心层（src/core、loader、math、renderer）│
+│ RhiRenderer / RhiMesh / BufferPool /          │
+│ ModelLoader / ModelAsset / Camera / Light /   │
+│ Material / BoundingBox / ParametricSurface    │
+├──────────────────────────────────────────────┤
+│ Qt RHI（main_mobile.cpp 选择后端）            │
+│ Android API > 31 → Vulkan；否则 OpenGL ES 3.1 │
+└──────────────────────────────────────────────┘
+```
+
+桌面专属的 `src/ui/`、`src/net/`、`src/plugin/` 在 Android 分支里根本不参与编译（`src/CMakeLists.txt` 的 `if(ANDROID)` 块收集完源码后直接 `return()`，不进入桌面段）。
+
+### 2.2 线程模型
+
+| 线程 | 做什么 |
+|---|---|
+| GUI 线程 | `MobileViewerBridge` 全部状态、QML、手势换算、模型上传前的 CPU 数据、`QTimer` 动画推进 |
+| `QtConcurrent` 线程池 | `loadModel()` 中 `QtConcurrent::run` 调用 `ModelLoader::loadCPU`，`QFutureWatcher<ModelAsset>` 回 GUI 线程收结果 |
+| 渲染线程 | `MobileRhiItemRenderer::initialize/synchronize/render`。`synchronize()` 是**唯一的数据同步点**，GUI 线程在此时阻塞；渲染侧只使用快照，不直接读写 Bridge 对象 |
+
+`MobileViewerBridge` 里带 `[SG-sync]` 注释的接口就是约定给 `synchronize()` 在渲染线程调用的（读状态、一次性取标志、回收退役网格、交付截图、回写统计）；其它接口只允许 GUI 线程访问。
+
+### 2.3 实际新增/改动文件清单
+
+| 路径 | 说明 |
+|---|---|
+| `src/main_mobile.cpp` | Android 入口；RHI 后端选择、QML 类型注册、加载主 QML |
+| `src/mobile/MobileViewerBridge.h/.cpp` | QML 单例 `ViewerBridge`；场景中枢 |
+| `src/mobile/MobileFileHelper.h/.cpp` | QML 单例 `FileHelper` 的跨平台部分：构造、recents、非 Android 的 `pickModel()` 兜底 |
+| `src/mobile/MobileFileHelper_android.cpp` | Android SAF/JNI 实现；`#if defined(Q_OS_ANDROID)` 包裹 |
+| `src/mobile/MobileRhiItem.h/.cpp` | QML 类型 `RhiView`（`QQuickRhiItem`）及渲染线程实现 |
+| `src/qml/MobileViewer.qml` | 主界面：`StackView`、工具栏、`RhiView`、手势层、HUD、动画控制、提示横幅 |
+| `src/qml/ViewerToolBar.qml` | 顶部工具栏（打开/面板/适配/投影/截图） |
+| `src/qml/GestureArea.qml` | 手势覆盖层（`PinchArea` + `MouseArea`） |
+| `src/qml/ModelListPage.qml` | 演示曲面 + 最近打开 + 系统文件选择（Android SAF / QML `FileDialog`） |
+| `src/qml/RenderModePanel.qml` | 右侧 `Drawer`：12 渲染模式、4 显示风格、显示选项 |
+| `android/AndroidManifest.xml` | Qt 模板风格清单；`QtActivity`、`glEsVersion`、Vulkan feature、`lib_name` |
+| `scripts/build_android.ps1` | Windows/PowerShell 构建脚本 |
+| `run.bat` | 清日志 → 启动 → 锁定 PID → 只看本进程日志的调试脚本 |
+| `src/CMakeLists.txt` | Android 分支 + 桌面分支；着色器清单 |
+| `CMakeLists.txt` | Qt/assimp 依赖、QML 模块、插件子目录的公共配置 |
+
+---
+
+## 三、工程配置与构建
+
+### 3.1 根 `CMakeLists.txt` 要点
+
+- `cmake_minimum_required(VERSION 3.21)`，`project(ModelViewer VERSION 1.1.0 ...)`，C++17。
+- `find_package(Qt6 6.9 REQUIRED COMPONENTS Core Gui Widgets Concurrent ShaderTools GuiPrivate CorePrivate Qml Quick QuickControls2 QuickDialogs2 Network)`。Widgets 供桌面使用，Android 链接时只用其中的 Core/Gui/Quick/QuickControls2/Concurrent/ShaderTools/CorePrivate/GuiPrivate。
+- Android 上 assimp 优先 `find_package(assimp CONFIG QUIET)`；找不到则 `FetchContent` 拉 `v5.4.3` 源码静态编译，并只打开 OBJ/STL/FBX/GLTF/PLY/3DS/COLLADA/MD5/BVH/X/SMD/ASE/BLEND/MS3D/MD2/MD3/AC/B3D 等 importer，禁用 exporter、tests、tools 和 `ASSIMP_BUILD_ZLIB`（用 NDK 自带 zlib）。
+- `qt_standard_project_setup()`；`plugins_src/DemoPlugin` 只在 `NOT ANDROID AND NOT IOS` 时加入。
+
+### 3.2 `src/CMakeLists.txt` 的 Android 分支
+
+源文件用 `file(GLOB_RECURSE ...)` 收集：`core/`、`loader/`、`math/`、`renderer/`（可移植核心）和 `mobile/`（全部桥接代码）；入口显式写 `main_mobile.cpp`。目标是 `qt_add_executable(ModelViewer ...)`，在 Android 上由 Qt 打包成 `libModelViewer_<abi>.so`。
+
+四个**必须保持**的配置点（都是实际踩坑后的结论）：
 
 ```cmake
-cmake_minimum_required(VERSION 3.20)
-project(ModelViewer VERSION 1.0 LANGUAGES CXX)
+# ① Debug 后缀必须为空：androiddeployqt 按 lib<target>_<abi>.so 找主库
+set(CMAKE_DEBUG_POSTFIX "" CACHE STRING "Debug 产物后缀（Android 必须为空）" FORCE)
 
-set(CMAKE_CXX_STANDARD 17)
-set(CMAKE_AUTOMOC ON)
-set(CMAKE_AUTOUIC ON)
-set(CMAKE_AUTORCC ON)
+qt_add_qml_module(ModelViewer
+    URI "ModelViewer"
+    VERSION 1.0
+    RESOURCE_PREFIX "/qt/qml"     # ② 必须显式写，否则 QML 资源落到 :/ModelViewer/
+    QML_FILES qml/MobileViewer.qml ...)
 
-# ---------- 公共依赖 ----------
-find_package(Qt6 6.7 REQUIRED COMPONENTS
-    Core Widgets OpenGL Gui Quick QuickControls2 ShaderTools
-)
-find_package(assimp REQUIRED)
-
-# ---------- 公共源文件 ----------
-set(COMMON_SOURCES
-    src/core/CpuMesh.h
-    src/core/Light.h
-    src/core/Material.h
-    src/loader/ModelLoader.h
-    src/loader/ModelLoader.cpp
-    src/math/BoundingBox.h
-    src/math/Camera.h
-    src/math/Camera.cpp
-    src/math/TrackBall.h
-    src/math/TrackBall.cpp
-    src/renderer/RhiMesh.h
-    src/renderer/RhiMesh.cpp
-    src/renderer/RhiRenderer.h
-    src/renderer/RhiRenderer.cpp
-)
-
-# ---------- 移动端条件编译 ----------
-if(ANDROID OR IOS)
-    qt_add_executable(ModelViewer
-        ${COMMON_SOURCES}
-        src/mobile/MobileViewerBridge.h
-        src/mobile/MobileViewerBridge.cpp
-        src/mobile/MobileGestureHandler.h
-        src/mobile/MobileGestureHandler.cpp
-        src/mobile/MobileFileHelper.h
-        src/mobile/MobileFileHelper.cpp
-        src/mobile/MobileRhiItem.h
-        src/mobile/MobileRhiItem.cpp
-        src/main_mobile.cpp
-    )
-
-    qt_add_qml_module(ModelViewer
-        URI "ModelViewer"
-        VERSION 1.0
-        QML_FILES
-            qml/MobileViewer.qml
-            qml/ViewerToolBar.qml
-            qml/GestureArea.qml
-            qml/ModelListPage.qml
-            qml/RenderModePanel.qml
-        RESOURCES
-            res/icons/mobile/
-    )
-
-    # Android 专属
-    if(ANDROID)
-        set_target_properties(ModelViewer PROPERTIES
-            QT_ANDROID_PACKAGE_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/android"
-            QT_ANDROID_TARGET_SDK_VERSION 34
-            QT_ANDROID_MIN_SDK_VERSION 26
-        )
-        target_compile_definitions(ModelViewer PRIVATE PLATFORM_ANDROID)
-    endif()
-
-    # iOS 专属
-    if(IOS)
-        set_target_properties(ModelViewer PROPERTIES
-            MACOSX_BUNDLE TRUE
-            MACOSX_BUNDLE_INFO_PLIST "${CMAKE_CURRENT_SOURCE_DIR}/ios/Info.plist"
-            XCODE_ATTRIBUTE_TARGETED_DEVICE_FAMILY "1,2"
-            XCODE_ATTRIBUTE_IPHONEOS_DEPLOYMENT_TARGET "16.0"
-        )
-        target_compile_definitions(ModelViewer PRIVATE PLATFORM_IOS)
-    endif()
-
-else()
-    # ---------- 桌面端原有构建（保持不变）----------
-    qt_add_executable(ModelViewer
-        ${COMMON_SOURCES}
-        src/ui/MainWindow.h
-        src/ui/MainWindow.cpp
-        src/ui/RhiWidget.h
-        src/ui/RhiWidget.cpp
-        src/main.cpp
-    )
-endif()
+set_target_properties(ModelViewer PROPERTIES
+    QT_ANDROID_PACKAGE_SOURCE_DIR "${CMAKE_SOURCE_DIR}/android"
+    QT_ANDROID_MIN_SDK_VERSION 26
+    QT_ANDROID_TARGET_SDK_VERSION 34)
+target_compile_definitions(ModelViewer PRIVATE PLATFORM_ANDROID)
 
 target_link_libraries(ModelViewer PRIVATE
-    Qt6::Core Qt6::Widgets Qt6::Gui Qt6::Quick Qt6::QuickControls2
-    assimp::assimp
-)
+    Qt6::Core Qt6::Gui Qt6::Quick Qt6::QuickControls2
+    Qt6::Concurrent Qt6::ShaderTools Qt6::CorePrivate Qt6::GuiPrivate
+    assimp::assimp)
+# ③ 移动端不链接 OpenMP：NDK 的 libomp.so 不会被打进 APK
+# ④ 着色器：GLSL "460,310 es" / HLSL 50 / MSL 12，PRECOMPILE + OPTIMIZE
 ```
 
-### 2.2 Android 构建环境
+说明：
+
+1. **Debug 后缀**：缓存里若有 `CMAKE_DEBUG_POSTFIX=d`，产物变成 `libModelViewerd_arm64-v8a.so`，androiddeployqt 报 `Cannot find application binary in build dir ...`。`FORCE` 是为了压掉已有缓存值。
+2. **`RESOURCE_PREFIX "/qt/qml"`**：本工程 `cmake_minimum_required` 是 3.21，QTP0001 策略停在 OLD，默认值会变成 `/`，导致 QML 落在 `:/ModelViewer/qml/...`，而入口加载的是 `qrc:/qt/qml/ModelViewer/qml/MobileViewer.qml`，运行时报 `No such file or directory`。显式指定后 `qmldir` 也随之落在默认导入路径 `:/qt/qml` 下。
+3. **OpenMP**：源码中没有任何 `#pragma omp`；若以后要用并行，必须同时把 `${OpenMP_omp_LIBRARY}` 加进 `QT_ANDROID_EXTRA_LIBS`，否则运行时 `UnsatisfiedLinkError: libomp.so not found`。
+4. **着色器**：桌面和 Android 共用同一份 `MODELVIEWER_SHADER_FILES`；`*.geom` 早已不参与编译（几何着色器在 HLSL/MSL 无等价物，线段改为 CPU 生成）。`310 es` 变体给 GLES 后端；qsb 同时带 SPIR-V 变体给 Vulkan 后端。
+
+### 3.3 包名、Activity 与产物
+
+清单使用 Qt 6 的 Gradle namespace 风格，**没有 `package` 属性**。包名由 `QT_ANDROID_PACKAGE_NAME` 决定，当前实际为：
+
+```
+包名    org.qtproject.example.ModelViewer
+Activity org.qtproject.qt.android.bindings.QtActivity
+主库    libModelViewer_arm64-v8a.so
+```
+
+`android.app.lib_name` 的 meta-data 值为 `ModelViewer`（对应主库名）；SAF 不需要任何存储权限，所以清单里没有 `READ_EXTERNAL_STORAGE` / `READ_MEDIA_*`。
+
+### 3.4 构建方式
+
+**Qt Creator（推荐）**：选择 Android arm64-v8a kit → 构建 → 运行/部署。生成的目标在构建目录里是 `src/ModelViewer_make_apk`（也可见 `src/apk_all`），输出 APK 在 `src/android-build-ModelViewer/build/outputs/apk/debug/`。
+
+**命令行（Qt 6.11 / Ninja 实际验证过的形式）**：
 
 ```bash
-# 安装 Qt for Android（在 Qt Maintenance Tool 中勾选 Android ARM64-v8a）
-# 配置 NDK 和 SDK 路径
-export ANDROID_SDK_ROOT=$HOME/Android/Sdk
-export ANDROID_NDK_ROOT=$HOME/Android/Sdk/ndk/26.1.10909125
-
-# 使用 Qt Creator 构建，或命令行：
-cmake -B build-android \
-  -DCMAKE_TOOLCHAIN_FILE=$ANDROID_NDK_ROOT/build/cmake/android.toolchain.cmake \
-  -DANDROID_ABI=arm64-v8a \
-  -DANDROID_PLATFORM=android-26 \
-  -DCMAKE_PREFIX_PATH=$QT6_ANDROID_PATH \
-  -DASSIMP_BUILD_TESTS=OFF \
-  -S .
-
-cmake --build build-android --target apk
+cmake --build build/Qt_6_11_1_for_Android_arm64_v8a_Debug \
+      --target ModelViewer_make_apk
 ```
 
-### 2.3 iOS 构建环境
+`scripts/build_android.ps1` 提供参数化的配置入口（`-QtAndroidRoot`、`-NdkRoot`、`-SdkRoot`、`-Abi`、`-BuildDir`），配置里用 `ANDROID_PLATFORM=android-26`。**注意**：脚本里写的是 `--target apk`、输出目录 `android-build/...`，与 Qt 6.11 实际生成的 `ModelViewer_make_apk` / `android-build-ModelViewer/...` 不一致，按脚本原样跑可能拿不到 APK；以 Qt Creator 或上面的命令为准。
 
-```bash
-# 需要 Xcode 15+ 和 Qt for iOS
-cmake -B build-ios \
-  -GXcode \
-  -DCMAKE_SYSTEM_NAME=iOS \
-  -DCMAKE_PREFIX_PATH=$QT6_IOS_PATH \
-  -DCMAKE_OSX_DEPLOYMENT_TARGET=16.0 \
-  -DASSIMP_BUILD_TESTS=OFF \
-  -S .
+### 3.5 调试脚本 `run.bat`
 
-# 使用 Xcode 打开并签名
-open build-ios/ModelViewer.xcodeproj
-```
+`run.bat` 位于仓库根目录，流程：检查设备 → `adb logcat -b all -c` → `am force-stop` → `am start -W -n org.qtproject.example.ModelViewer/org.qtproject.qt.android.bindings.QtActivity` → 轮询 `pidof`（最多 10 秒）→ `adb logcat --pid=<PID> -v time` 只显示本进程日志 → 结束时导出 crash 缓冲。
+
+文件刻意保持**纯 ASCII**：cmd.exe 按系统 ANSI 代码页解析 bat，UTF-8 中文会在多字节字符中间被截断，导致后半行被当成命令执行。日志过滤器屏蔽 Adreno/libEGL/Surface/Choreographer/HWUI/MediaCodec/AAudio 等系统噪声，但**不屏蔽** `libc`、`DEBUG`、`AndroidRuntime`——原生 `Fatal signal` 与 Java 栈靠它们输出。
 
 ---
 
-## 三、移动端 UI 层设计
+## 四、入口与 QML 类型注册
 
-### 3.1 主入口 `src/main_mobile.cpp`
+`src/main_mobile.cpp` 的关键行为（代码为准）：
 
 ```cpp
-#include <QGuiApplication>
-#include <QQmlApplicationEngine>
-#include <QQuickStyle>
-#include "mobile/MobileViewerBridge.h"
-#include "mobile/MobileFileHelper.h"
-
-int main(int argc, char *argv[])
-{
-    // 移动端必须在 QGuiApplication 创建前设置 RHI 后端
-#if defined(PLATFORM_ANDROID)
-    qputenv("QSG_RHI_BACKEND", "opengles");
-#elif defined(PLATFORM_IOS)
-    qputenv("QSG_RHI_BACKEND", "metal");
+#if defined(Q_OS_ANDROID)
+    const int sdkInt = QJniObject::getStaticField<jint>(
+        "android/os/Build$VERSION", "SDK_INT");
+    const bool useVulkan = sdkInt > 31;          // Android 12L 及以上
+    qputenv("QSG_RHI_BACKEND", useVulkan ? "vulkan" : "opengl");
+    if (!useVulkan) {
+        QSurfaceFormat esFormat;
+        esFormat.setRenderableType(QSurfaceFormat::OpenGLES);
+        esFormat.setVersion(3, 1);
+        esFormat.setDepthBufferSize(24);
+        esFormat.setStencilBufferSize(8);
+        esFormat.setSwapBehavior(QSurfaceFormat::DoubleBuffer);
+        QSurfaceFormat::setDefaultFormat(esFormat);
+    }
+    if (!qEnvironmentVariableIsEmpty("MYSIC_QSG_TIMING")) {
+        qputenv("QSG_RENDER_TIMING", "1");
+        qputenv("QSG_INFO", "1");
+    }
 #endif
 
     QGuiApplication app(argc, argv);
     QQuickStyle::setStyle("Material");
+    auto* bridge = new MobileViewerBridge();
+    auto* fileHelper = new MobileFileHelper(bridge);
 
-    // 注册 QML 类型
-    qmlRegisterType<MobileViewerBridge>("ModelViewer", 1, 0, "ViewerBridge");
-    qmlRegisterSingletonType<MobileFileHelper>("ModelViewer", 1, 0, "FileHelper",
-        [](QQmlEngine*, QJSEngine*) -> QObject* {
-            return new MobileFileHelper();
-        });
+    qmlRegisterSingletonInstance("ModelViewer", 1, 0, "ViewerBridge", bridge);
+    qmlRegisterSingletonInstance("ModelViewer", 1, 0, "FileHelper", fileHelper);
+    qmlRegisterType<MobileRhiItem>("ModelViewer", 1, 0, "RhiView");
 
     QQmlApplicationEngine engine;
-    engine.load(QUrl(u"qrc:/ModelViewer/qml/MobileViewer.qml"_qs));
-    return app.exec();
-}
+    engine.load(QUrl("qrc:/qt/qml/ModelViewer/qml/MobileViewer.qml"));
 ```
 
-### 3.2 QML 主界面 `qml/MobileViewer.qml`
+要点：
 
-```qml
-import QtQuick
-import QtQuick.Controls.Material
-import ModelViewer
-
-ApplicationWindow {
-    id: root
-    visible: true
-    width: Screen.width
-    height: Screen.height
-    title: "ModelViewer"
-
-    // C++ 桥接实例，持有 RhiRenderer
-    ViewerBridge {
-        id: bridge
-        onModelLoaded: (modelName) => toolBar.title = modelName
-        onLoadError:   (msg)       => errorBanner.show(msg)
-    }
-
-    // 顶部工具栏
-    ViewerToolBar {
-        id: toolBar
-        anchors { top: parent.top; left: parent.left; right: parent.right }
-        onOpenFileClicked:        FileHelper.pickModel()
-        onRenderPanelToggled:     renderPanel.open()
-        onResetViewClicked:       bridge.resetView()
-        onScreenshotClicked:      bridge.saveScreenshot()
-        onProjectionToggled: (ortho) => bridge.setOrthographic(ortho)
-    }
-
-    // 3D 渲染区域（MobileRhiItem 内嵌 RhiRenderer）
-    MobileRhiItemView {
-        id: rhiView
-        anchors {
-            top: toolBar.bottom
-            left: parent.left
-            right: parent.right
-            bottom: parent.bottom
-        }
-        bridge: bridge
-
-        // 手势覆盖层
-        GestureArea {
-            anchors.fill: parent
-            onRotate:  (dx, dy)     => bridge.rotate(dx, dy)
-            onPan:     (dx, dy)     => bridge.pan(dx, dy)
-            onZoom:    (scale)      => bridge.zoom(scale)
-            onDoubleTap:            bridge.fitView()
-            onLongPress:(x, y)      => bridge.pickObject(x, y)
-        }
-    }
-
-    // 渲染模式侧滑面板
-    RenderModePanel {
-        id: renderPanel
-        width: Math.min(parent.width * 0.75, 320)
-        height: parent.height
-        onModeSelected: (mode) => bridge.setRenderMode(mode)
-    }
-
-    // 错误横幅
-    BannerMessage { id: errorBanner; anchors.bottom: parent.bottom }
-
-    // 监听文件选择结果
-    Connections {
-        target: FileHelper
-        function onFileSelected(path) { bridge.loadModel(path) }
-    }
-}
-```
-
-### 3.3 工具栏 `qml/ViewerToolBar.qml`
-
-```qml
-import QtQuick
-import QtQuick.Controls.Material
-import QtQuick.Layouts
-
-ToolBar {
-    id: bar
-    property string title: "ModelViewer"
-
-    signal openFileClicked
-    signal renderPanelToggled
-    signal resetViewClicked
-    signal screenshotClicked
-    signal projectionToggled(bool ortho)
-
-    RowLayout {
-        anchors.fill: parent
-        spacing: 0
-
-        ToolButton {
-            icon.source: "qrc:/icons/folder_open.svg"
-            onClicked: bar.openFileClicked()
-            ToolTip.text: "打开模型"
-            ToolTip.visible: hovered
-        }
-
-        Label {
-            Layout.fillWidth: true
-            text: bar.title
-            font.pixelSize: 16
-            font.bold: true
-            elide: Text.ElideMiddle
-            horizontalAlignment: Text.AlignHCenter
-        }
-
-        ToolButton {
-            icon.source: "qrc:/icons/layers.svg"
-            onClicked: bar.renderPanelToggled()
-            ToolTip.text: "渲染模式"
-        }
-
-        ToolButton {
-            icon.source: "qrc:/icons/fit_screen.svg"
-            onClicked: bar.resetViewClicked()
-            ToolTip.text: "重置视图"
-        }
-
-        ToolButton {
-            id: projBtn
-            checkable: true
-            icon.source: checked ? "qrc:/icons/ortho.svg" : "qrc:/icons/perspective.svg"
-            onCheckedChanged: bar.projectionToggled(checked)
-            ToolTip.text: checked ? "正交投影" : "透视投影"
-        }
-
-        ToolButton {
-            icon.source: "qrc:/icons/camera.svg"
-            onClicked: bar.screenshotClicked()
-            ToolTip.text: "截图"
-        }
-    }
-}
-```
-
-### 3.4 渲染模式面板 `qml/RenderModePanel.qml`
-
-```qml
-import QtQuick
-import QtQuick.Controls.Material
-import QtQuick.Layouts
-
-Drawer {
-    id: panel
-    edge: Qt.RightEdge
-    signal modeSelected(int mode)
-
-    // 渲染模式枚举与 RhiRenderer::RenderMode 对齐
-    readonly property var modes: [
-        { name: "Phong 着色",    icon: "qrc:/icons/phong.svg",     value: 0 },
-        { name: "线框模式",      icon: "qrc:/icons/wireframe.svg", value: 1 },
-        { name: "法线可视化",    icon: "qrc:/icons/normal.svg",    value: 2 },
-        { name: "平面着色",      icon: "qrc:/icons/flat.svg",      value: 3 },
-        { name: "PBR 渲染",      icon: "qrc:/icons/pbr.svg",       value: 4 },
-        { name: "阴影映射",      icon: "qrc:/icons/shadow.svg",    value: 5 },
-        { name: "天空盒",        icon: "qrc:/icons/skybox.svg",    value: 6 },
-        { name: "剖面视图",      icon: "qrc:/icons/clip.svg",      value: 7 },
-        { name: "分屏对比",      icon: "qrc:/icons/splitview.svg", value: 8 },
-    ]
-
-    ListView {
-        anchors.fill: parent
-        model: panel.modes
-        delegate: ItemDelegate {
-            width: parent.width
-            contentItem: RowLayout {
-                Image { source: modelData.icon; width: 24; height: 24 }
-                Label { text: modelData.name; font.pixelSize: 15 }
-            }
-            onClicked: {
-                panel.modeSelected(modelData.value)
-                panel.close()
-            }
-        }
-    }
-}
-```
+- `QSG_RHI_BACKEND` 必须在 `QGuiApplication` 构造前设置；不要写 `QT_OPENGL=es2`（Android 平台插件不读这个桌面变量）。
+- 两个单例用 `qmlRegisterSingletonInstance` 直接注册已有对象，不是工厂函数；因此 `ViewerBridge` 与 `FileHelper` 是 QML 里的全局对象名，不是在 QML 中 `new` 出来的组件。
+- 单例对象不设 parent，进程退出时由系统回收，避免与 engine 析构顺序竞争。
+- `objectCreationFailed` 时调用 `QCoreApplication::exit(-1)`。若 QML 加载失败，紧接着可能出现 `FORTIFY ... destroyed mutex` + `SIGABRT`，那是进程在渲染线程仍活动时快速退出的连锁反应，不是根因。
 
 ---
 
-## 四、触控交互系统
+## 五、QML UI 层
 
-### 4.1 手势捕获 `qml/GestureArea.qml`
+### 5.1 文件职责
 
-```qml
-import QtQuick
+| 文件 | 实际职责 |
+|---|---|
+| `MobileViewer.qml` | `ApplicationWindow` 根组件；`StackView` 管理主视图和模型列表页；`Material.Dark` 主题、深色背景；底部统计 HUD；加载 `BusyIndicator`；动画播放/停止按钮；提示横幅；两个 `Connections` 处理 `FileHelper` 与 `ViewerBridge` 的信号；首屏空场景自动生成演示球（`createSurface(1)`） |
+| `ViewerToolBar.qml` | `ToolBar` + `RowLayout`；5 个按钮发出 `openFileRequested` / `renderPanelRequested` / `fitRequested` / `projectionToggled(bool)` / `screenshotRequested`；图标取自 `qrc:/icons/*`（`qt_add_resources` 的 `/icons` 前缀） |
+| `GestureArea.qml` | `PinchArea`（外层）+ `MouseArea`（内层）组合；发出 6 个手势信号 |
+| `ModelListPage.qml` | `StackView` 第二页；5 个参数曲面 + `FileHelper.recentModels()` 的最近打开；Android 走 `FileHelper.pickModel()`，其它平台走 `QtQuick.Dialogs.FileDialog`；`onAccepted` 把 `file:///` 去掉后调用 `loadModel` |
+| `RenderModePanel.qml` | 右侧 `Drawer`；12 渲染模式 + 4 显示风格 + 坐标轴/网格/剔除/LOD 开关 + 法线长度滑杆；发出 `renderModeSelected` / `displayStyleSelected` |
 
-Item {
-    id: root
+### 5.2 `MobileViewer.qml` 中的信号连接（实际）
 
-    // 信号定义，由 C++ 手势层或 QML 直接消费
-    signal rotate(real dx, real dy)
-    signal pan(real dx, real dy)
-    signal zoom(real scaleDelta)
-    signal doubleTap()
-    signal longPress(real x, real y)
+| QML 信号 | 调用 |
+|---|---|
+| `toolBar.openFileRequested` | `pageStack.push(modelListComponent)` |
+| `toolBar.renderPanelRequested` | `renderPanel.open()` |
+| `toolBar.fitRequested` | `ViewerBridge.fitView()` |
+| `toolBar.projectionToggled(ortho)` | `ViewerBridge.setOrthographic(ortho)` |
+| `toolBar.screenshotRequested` | `ViewerBridge.saveScreenshot()` |
+| `renderPanel.renderModeSelected(mode)` | `ViewerBridge.setRenderMode(mode)` |
+| `renderPanel.displayStyleSelected(style)` | `ViewerBridge.setDisplayStyle(style)` |
+| `gestureArea.*` | 见[第六章](#六触控交互) |
+| `FileHelper.fileSelected(path)` | 弹出列表页后 `ViewerBridge.loadModel(path)` |
+| `ViewerBridge.loadError` / `screenshotSaved` / `screenshotFailed` / `selectionChanged` | 提示横幅 `banner.show(...)` |
 
-    // 单指旋转
-    DragHandler {
-        id: rotateDrag
-        acceptedButtons: Qt.NoButton   // 触屏无按键
-        acceptedDevices: PointerDevice.TouchScreen | PointerDevice.Mouse
-        onActiveChanged: if (!active) _lastPos = Qt.point(0, 0)
-        onCentroidChanged: {
-            if (_lastPos.x !== 0) {
-                root.rotate(centroid.position.x - _lastPos.x,
-                            centroid.position.y - _lastPos.y)
-            }
-            _lastPos = centroid.position
-        }
-        property point _lastPos: Qt.point(0, 0)
-    }
+### 5.3 渲染模式与显示风格枚举
 
-    // 双指缩放
-    PinchHandler {
-        id: pinch
-        acceptedDevices: PointerDevice.TouchScreen
-        onScaleChanged: root.zoom(activeScale - 1.0)
-        onTranslationChanged: root.pan(translation.x, translation.y)
-    }
+与 `src/renderer/RhiRenderer.h` 完全一致：
 
-    // 双击复位
-    TapHandler {
-        acceptedDevices: PointerDevice.TouchScreen | PointerDevice.Mouse
-        numberOfTapsRequired: 2
-        onTapped: root.doubleTap()
-    }
+- `RenderMode`：`0` Phong、`1` Wireframe、`2` Normals、`3` FaceNormals、`4` VertexNormals、`5` FlatShading、`6` PBR、`7` ShadowMapping、`8` Skybox、`9` Selection、`10` ClippingPlane、`11` SplitScreen。
+- `DisplayStyle`：`0` Shaded、`1` Wireframe、`2` WireShaded、`3` Realistic。
 
-    // 长按拾取
-    TapHandler {
-        acceptedDevices: PointerDevice.TouchScreen
-        longPressThreshold: 0.6
-        onLongPressed: root.longPress(point.position.x, point.position.y)
-    }
-}
-```
+### 5.4 模型列表页行为
 
-### 4.2 手势处理器 `src/mobile/MobileGestureHandler.h`
-
-```cpp
-#pragma once
-#include <QObject>
-#include "math/Camera.h"
-#include "math/TrackBall.h"
-
-// 将 QML 手势信号转换为 Camera / TrackBall 操作
-class MobileGestureHandler : public QObject
-{
-    Q_OBJECT
-public:
-    explicit MobileGestureHandler(Camera* camera,
-                                  TrackBall* trackBall,
-                                  QObject* parent = nullptr);
-
-    // 由 MobileViewerBridge 转发 QML 信号
-    void handleRotate(float dx, float dy);
-    void handlePan(float dx, float dy);
-    void handleZoom(float scaleDelta);
-    void handleFitView(const BoundingBox& bounds);
-
-private:
-    Camera*     m_camera;
-    TrackBall*  m_trackBall;
-
-    // 触控灵敏度系数（移动端屏幕密度适配）
-    static constexpr float kRotateSensitivity = 0.5f;
-    static constexpr float kPanSensitivity    = 0.003f;
-    static constexpr float kZoomSensitivity   = 1.5f;
-};
-```
-
-### 4.3 手势处理器实现 `src/mobile/MobileGestureHandler.cpp`
-
-```cpp
-#include "MobileGestureHandler.h"
-#include <QScreen>
-#include <QGuiApplication>
-#include <cmath>
-
-MobileGestureHandler::MobileGestureHandler(Camera* camera,
-                                           TrackBall* trackBall,
-                                           QObject* parent)
-    : QObject(parent), m_camera(camera), m_trackBall(trackBall)
-{}
-
-void MobileGestureHandler::handleRotate(float dx, float dy)
-{
-    // 将像素偏移转换为角度，乘以屏幕 DPI 系数归一化
-    const float dpi = QGuiApplication::primaryScreen()->devicePixelRatio();
-    m_trackBall->rotate(dx * kRotateSensitivity / dpi,
-                        dy * kRotateSensitivity / dpi);
-}
-
-void MobileGestureHandler::handlePan(float dx, float dy)
-{
-    const float dpi = QGuiApplication::primaryScreen()->devicePixelRatio();
-    m_camera->pan(dx * kPanSensitivity / dpi,
-                  dy * kPanSensitivity / dpi);
-}
-
-void MobileGestureHandler::handleZoom(float scaleDelta)
-{
-    // scaleDelta > 0 放大，< 0 缩小
-    m_camera->zoom(-scaleDelta * kZoomSensitivity);
-}
-
-void MobileGestureHandler::handleFitView(const BoundingBox& bounds)
-{
-    m_camera->fitBounds(bounds);
-    m_trackBall->reset();
-}
-```
+列表分两节：`演示曲面（参数化生成）`（平面/球体/圆环/圆柱/圆锥，对应 `createSurface(0..4)`）与 `最近打开`。最近打开来自 `FileHelper.recentModels()`，条目显示 `path.split("/").pop()` 作为名字；点击“清空”调用 `FileHelper.clearRecents()` 后重建列表。
 
 ---
 
-## 五、模型文件管理
+## 六、触控交互
 
-### 5.1 平台文件选择器 `src/mobile/MobileFileHelper.h`
+### 6.1 `GestureArea.qml` 信号
+
+`GestureArea` 使用 `PinchArea` 包住 `MouseArea`：`MouseArea` 没有 pinch 属性组，捏合由 `PinchArea` 提供；两指时 `PinchArea` 拦截触摸，单指仍交给 `MouseArea`。桌面调试时鼠标拖动/滚轮同样生效。
+
+| 信号 | 触发 |
+|---|---|
+| `gestureBegin(x, y)` | `MouseArea.onPressed`，记录旋转起点 |
+| `rotated(x, y, vw, vh)` | 单指/左键拖动；传绝对坐标与视口尺寸 |
+| `panned(dx, dy)` | `PinchArea.onPinchUpdated` 的中心位移 |
+| `zoomed(delta)` | 捏合用比例增量 `1 - scale/previousScale`；滚轮用 `angleDelta.y/120` |
+| `doubleTapped()` | `MouseArea.onDoubleClicked` |
+| `longPressed(x, y, vw, vh)` | `MouseArea.onPressAndHold` |
+
+### 6.2 与桥接接口的映射
+
+| 手势信号 | `ViewerBridge` 槽 |
+|---|---|
+| `gestureBegin` | `beginRotateGesture(x, y)` |
+| `rotated` | `rotateAt(x, y, vw, vh)` |
+| `panned` | `panGesture(dx, dy)` |
+| `zoomed` | `zoomGesture(delta)` |
+| `doubleTapped` | `fitView()` |
+| `longPressed` | `pickObject(x, y, vw, vh)` |
+
+实现语义与桌面 `RhiWidget` 的鼠标处理一致：`MobileViewerBridge` 内部持有 `m_lastRotatePoint` 并调用 `Camera::beginRotate`/`Camera::rotate`；`Camera` 内部自带 TrackBall 语义，因此**没有**独立的 `MobileGestureHandler` 类，也没有针对 DPI 的灵敏度系数。捏合缩放的符号在 QML 侧处理：`Camera::zoom` 正值拉远，所以放大时传负值。
+
+其它视图接口：`resetView()`、`fitView()`、`applyViewPreset(0..8)`、`setOrthographic(bool)`、`selectMesh(int)`。
+
+---
+
+## 七、模型加载与文件管理
+
+### 7.1 `MobileFileHelper`（QML 单例 `FileHelper`）
 
 ```cpp
-#pragma once
-#include <QObject>
-#include <QString>
-
-// 跨平台文件选择器
-// Android 使用 Qt Android Extras / JNI 调用 SAF
-// iOS 使用 Qt iOS Extras / NSDocumentPickerViewController
-class MobileFileHelper : public QObject
-{
+class MobileFileHelper : public QObject {
     Q_OBJECT
 public:
     explicit MobileFileHelper(QObject* parent = nullptr);
+    ~MobileFileHelper() override;
 
-    Q_INVOKABLE void pickModel();       // QML 调用：弹出系统文件选择器
-    Q_INVOKABLE QStringList recentModels() const;  // 最近打开列表
+public slots:
+    Q_INVOKABLE void pickModel();
+    Q_INVOKABLE QStringList recentModels() const;
     Q_INVOKABLE void clearRecents();
 
 signals:
     void fileSelected(const QString& path);
-    void pickCancelled();
+    void filePickCancelled();
 
 private:
     void saveToRecents(const QString& path);
-    QStringList m_recents;
-
-    static const int kMaxRecents = 10;
+    QStringList m_recents;   // 上限 10 条
 };
 ```
 
-### 5.2 Android 实现片段
+`recentModels()` / `clearRecents()` / `saveToRecents()` 在 `MobileFileHelper.cpp` 中用 `QSettings` 持久化，键为 `mobile/recents`，最多保留 10 条。注意当前实现写入 recents 的是**拷贝到 cache 后的本地路径**（不是原始显示名），QML 侧再取 basename 显示。
 
-```cpp
-// MobileFileHelper_android.cpp
-#ifdef PLATFORM_ANDROID
-#include <QJniObject>
-#include <QtCore/private/qandroidextras_p.h>
+### 7.2 Android SAF 流程（`MobileFileHelper_android.cpp`）
 
-void MobileFileHelper::pickModel()
-{
-    // 支持格式 MIME 类型
-    const QStringList mimeTypes = {
-        "model/obj", "model/gltf+json", "model/gltf-binary",
-        "application/octet-stream"   // FBX / 3DS / STL 通用
-    };
+1. 构造 `ACTION_OPEN_DOCUMENT` intent，加 `OPENABLE` category，`setType("*/*")`，再用 `EXTRA_MIME_TYPES` 传多 MIME（model/obj、model/stl、model/gltf+json、model/gltf-binary、model/vnd.collada+xml、application/octet-stream、application/x-binary）。
+2. `QtAndroidPrivate::startActivity(intent, 24680, callback)`，回调在 GUI 线程。需要 `Qt6::CorePrivate`（`qandroidextras_p.h`）。
+3. `RESULT_OK` 且 data 有效时取 `content://` URI；用 `getLastPathSegment()` 尽力提取后缀（与 `ModelLoader::isAssimpFormat` 的格式子集对齐，不认识则不补后缀，让 Assimp 按内容探测）。
+4. 通过 `ContentResolver.openInputStream` 循环拷贝到：
+   `<CacheLocation>/modelview_import/<yyyyMMdd_HHmmsszzz>[.ext]`
+   ——因为 Assimp/`QFile` 无法直接读 `content://`，必须落成真实路径。
+5. `saveToRecents(dest)` 后 `emit fileSelected(dest)`；取消或失败 `emit filePickCancelled()`。
 
-    auto intent = QJniObject("android/content/Intent",
-                             "(Ljava/lang/String;)V",
-                             QJniObject::fromString("android.intent.action.OPEN_DOCUMENT").object());
-    intent.callMethod<void>("addCategory", "(Ljava/lang/String;)V",
-        QJniObject::fromString("android.intent.category.OPENABLE").object());
-    intent.callMethod<void>("setType", "(Ljava/lang/String;)V",
-        QJniObject::fromString("*/*").object());
+**条件编译细节**：该 .cpp 在**所有 include 之前**先 `#include <QtCore/qglobal.h>`，再 `#if defined(Q_OS_ANDROID)`。因为 `Q_OS_ANDROID` 是 `qglobal.h` 定义的；若把 `#if` 放在 include 之前，整个文件会被预处理掉，链接时报 `undefined symbol: MobileFileHelper::pickModel()`。对应的非 Android 兜底在 `MobileFileHelper.cpp` 里由 `#if !defined(Q_OS_ANDROID)` 提供：打一条 warning 并 `emit filePickCancelled()`，QML 侧改用 `FileDialog`。
 
-    // 设置多 MIME 类型过滤
-    QJniObject mimeArray = QJniObject::callStaticObjectMethod(
-        "java/util/Arrays", "copyOf", ...);
-    intent.callMethod<void>("putExtra", "(Ljava/lang/String;[Ljava/lang/String;)V",
-        QJniObject::fromString("android.intent.extra.MIME_TYPES").object(),
-        mimeArray.object());
+### 7.3 异步加载（`MobileViewerBridge::loadModel`）
 
-    QtAndroidPrivate::startActivity(intent, 42, [this](int, int resultCode, const QJniObject& data) {
-        if (resultCode == -1 && data.isValid()) {  // RESULT_OK
-            const QString path = data.callObjectMethod("getData", "()Landroid/net/Uri;")
-                                     .callObjectMethod("toString", "()Ljava/lang/String;")
-                                     .toString();
-            emit fileSelected(path);
-            saveToRecents(path);
-        } else {
-            emit pickCancelled();
-        }
-    });
-}
-#endif
+```
+QML loadModel(path)
+  → 文件存在性检查，失败 emit loadError
+  → m_loading = true；emit loadingChanged / loadStarted / loadProgress(0.05)
+  → QFutureWatcher<ModelAsset> + QtConcurrent::run([](path){ ModelLoader loader; return loader.loadCPU(path); })
+  → finished 回调（GUI 线程）取 watcher->result()
+  → m_loading = false；空 meshes → loadError
+  → loadProgress(0.9) → setMeshesInternal(...) → loadProgress(1.0)
 ```
 
-### 5.3 iOS 实现片段
+`setMeshesInternal()` 会把旧网格放入 `m_retired`（等渲染线程释放 GPU 后删除）、重建 `RhiMesh` 列表与场景包围盒、重置动画状态、更新 `m_modelLabel`、`m_camera.fitToView`、计算法线长度、重置裁剪面，最后 `emit meshesChanged()` + `modelLoaded(label, meshCount, triangles)` 并请求一帧。
 
-```cpp
-// MobileFileHelper_ios.mm
-#ifdef PLATFORM_IOS
-#import <UIKit/UIKit.h>
-#import <UniformTypeIdentifiers/UniformTypeIdentifiers.h>
-
-void MobileFileHelper::pickModel()
-{
-    NSArray<UTType*>* types = @[
-        [UTType typeWithFilenameExtension:@"obj"],
-        [UTType typeWithFilenameExtension:@"gltf"],
-        [UTType typeWithFilenameExtension:@"glb"],
-        [UTType typeWithFilenameExtension:@"fbx"],
-        [UTType typeWithFilenameExtension:@"stl"],
-        [UTType typeWithFilenameExtension:@"3ds"],
-        [UTType typeWithFilenameExtension:@"dae"],
-    ];
-
-    UIDocumentPickerViewController* picker =
-        [[UIDocumentPickerViewController alloc] initForOpeningContentTypes:types];
-    picker.allowsMultipleSelection = NO;
-
-    // 通过 delegate 回调
-    // __bridge 转回 C++ this 指针
-    MobileFilePickerDelegate* delegate =
-        [[MobileFilePickerDelegate alloc] initWithCallback:^(NSURL* url) {
-            const QString path = QString::fromNSString(url.absoluteString);
-            emit fileSelected(path);
-            saveToRecents(path);
-        }];
-    picker.delegate = delegate;
-
-    UIViewController* rootVC =
-        [UIApplication sharedApplication].keyWindow.rootViewController;
-    [rootVC presentViewController:picker animated:YES completion:nil];
-}
-#endif
-```
-
-### 5.4 模型列表页 `qml/ModelListPage.qml`
-
-```qml
-import QtQuick
-import QtQuick.Controls.Material
-import QtQuick.Layouts
-import ModelViewer
-
-Page {
-    title: "选择模型"
-
-    header: ToolBar {
-        RowLayout {
-            anchors.fill: parent
-            ToolButton {
-                icon.source: "qrc:/icons/arrow_back.svg"
-                onClicked: pageStack.pop()
-            }
-            Label {
-                text: "模型库"
-                font.pixelSize: 18
-                font.bold: true
-                Layout.fillWidth: true
-            }
-            ToolButton {
-                icon.source: "qrc:/icons/add.svg"
-                onClicked: FileHelper.pickModel()
-            }
-        }
-    }
-
-    // 内置演示模型 + 最近打开
-    ListView {
-        anchors.fill: parent
-        model: ListModel {
-            id: modelList
-            Component.onCompleted: {
-                // 内置示例模型
-                append({ name: "茶壶",       path: "qrc:/models/teapot.obj",   thumb: "qrc:/thumbnails/teapot.png"  })
-                append({ name: "Stanford 兔", path: "qrc:/models/bunny.obj",    thumb: "qrc:/thumbnails/bunny.png"   })
-                append({ name: "龙模型",      path: "qrc:/models/dragon.obj",   thumb: "qrc:/thumbnails/dragon.png"  })
-                append({ name: "宇航员",      path: "qrc:/models/astronaut.glb",thumb: "qrc:/thumbnails/astro.png"   })
-                // 最近打开
-                const recents = FileHelper.recentModels()
-                for (let p of recents) {
-                    append({ name: p.split("/").pop(), path: p, thumb: "qrc:/icons/file_3d.svg" })
-                }
-            }
-        }
-
-        delegate: ItemDelegate {
-            width: parent.width
-            height: 72
-            contentItem: RowLayout {
-                spacing: 12
-                Image {
-                    source: model.thumb
-                    width: 48; height: 48
-                    fillMode: Image.PreserveAspectFit
-                }
-                Column {
-                    Label { text: model.name; font.pixelSize: 15; font.bold: true }
-                    Label { text: model.path; font.pixelSize: 11; opacity: 0.6; elide: Text.ElideLeft }
-                }
-            }
-            onClicked: {
-                bridge.loadModel(model.path)
-                pageStack.pop()
-            }
-        }
-    }
-}
-```
+`ModelAsset` 定义在 `src/core/Animation.h`，含 `QVector<CpuMesh> meshes` 与 `QVector<AnimationClip> animations`；`ModelLoader::loadCPU()` 返回的是 `ModelAsset`（不是早期文档里的 `QVector<CpuMesh>`）。
 
 ---
 
-## 六、渲染后端适配
+## 八、渲染、截图与统计
 
-### 6.1 `MobileRhiItem` — `QQuickRhiItem` 宿主
+### 8.1 `MobileRhiItem` / `MobileRhiItemRenderer`
 
-```cpp
-// src/mobile/MobileRhiItem.h
-#pragma once
-#include <QtQuick/QQuickRhiItem>
-#include "renderer/RhiRenderer.h"
-#include "mobile/MobileViewerBridge.h"
+`MobileRhiItem : QQuickRhiItem` 暴露 `bridge` 属性；`setBridge()` 连接 `frameUpdateRequested` 信号到 `update()`，形成“Bridge 请求 → QQuickRhiItem 调度 → synchronize + render”的回路。构造时 `setSampleCount(1)`（默认关 MSAA，QML 可覆盖）。
 
-// 作为 QML 中的渲染控件，替代桌面端的 RhiWidget
-class MobileRhiItem : public QQuickRhiItem
-{
-    Q_OBJECT
-    QML_ELEMENT
-    Q_PROPERTY(MobileViewerBridge* bridge READ bridge WRITE setBridge NOTIFY bridgeChanged)
-
-public:
-    explicit MobileRhiItem(QQuickItem* parent = nullptr);
-
-    MobileViewerBridge* bridge() const { return m_bridge; }
-    void setBridge(MobileViewerBridge* b);
-
-    QQuickRhiItemRenderer* createRenderer() override;
-
-signals:
-    void bridgeChanged();
-
-private:
-    MobileViewerBridge* m_bridge = nullptr;
-};
-
-// --- Renderer ---
-class MobileRhiItemRenderer : public QQuickRhiItemRenderer
-{
-public:
-    explicit MobileRhiItemRenderer(RhiRenderer* renderer);
-    void initialize(QRhi* rhi, QRhiRenderTarget* renderTarget,
-                    QRhiCommandBuffer* cb, const QSize& size) override;
-    void synchronize(QQuickRhiItem* item) override;
-    void render(QRhiCommandBuffer* cb) override;
-
-private:
-    RhiRenderer* m_renderer;
-};
-```
-
-### 6.2 Android OpenGL ES 3.1 着色器兼容
-
-Android 不支持 OpenGL ES < 3.1 的几何着色器，在 `CMakeLists.txt` 中追加编译定义：
-
-```cmake
-if(ANDROID)
-    target_compile_definitions(ModelViewer PRIVATE
-        NOGEOMSHADER          # 禁用几何着色器渲染路径
-        QT_RHI_GLES_COMPAT    # 强制 GLSL 版本为 #version 310 es
-    )
-endif()
-```
-
-在 `RhiRenderer.cpp` 对应位置加守卫：
+`MobileRhiItemRenderer` 复用桌面 `RhiRenderer`（零改动），三个 `QQuickRhiItemRenderer` 重载的实际签名是：
 
 ```cpp
-void RhiRenderer::buildNormalPipeline()
-{
-#ifdef NOGEOMSHADER
-    // 移动端：用顶点着色器模拟法线线段（双顶点 drawArrays）
-    m_normalPipeline = buildPipelineFromFiles(
-        ":/shaders/normal_mobile.vert",
-        ":/shaders/normal_mobile.frag");
-#else
-    m_normalPipeline = buildPipelineFromFiles(
-        ":/shaders/normal.vert",
-        ":/shaders/normal.geom",
-        ":/shaders/normal.frag");
-#endif
-}
+void initialize(QRhiCommandBuffer* cb) override;
+void synchronize(QQuickRhiItem* item) override;
+void render(QRhiCommandBuffer* cb) override;
 ```
 
-### 6.3 iOS Metal 后端要求
+`initialize()` 两分支：首次创建时若 `cb` 为空则置 `m_pendingInit`，推迟到 `render()`；已有 renderer 时 `setRenderTarget(renderTarget()) + rebuildPipelines()`。
 
-iOS 使用 Metal 后端，需确保：
+### 8.2 `synchronize()` 的顺序
 
-- 所有 GLSL 着色器通过 `qt_add_shaders()` 转译为 MSL（Qt Shader Tools 自动处理）
-- `clipSpaceCorrMatrix()` 已在 `RhiRenderer` 中正确调用（Metal NDC 与 OpenGL 不同）
-- 纹理坐标翻转通过 Uniform Buffer 中的 `uFlipY` 标志控制
+1. `m_bridge->reclaimRetiredMeshes()`：在渲染线程释放并删除退役网格（此时 GUI 阻塞，指针安全）。
+2. 相机快照：`Camera` 禁止拷贝且 fov 没有 setter，两侧 fov 恒为默认 45°，逐字段同步 `setPosition/setTarget/setUp/setProjectionType`；aspect 在 `render()` 中按实际像素尺寸设置。
+3. 值拷贝 `Light` / `Material` / `QVector<RhiMesh*>` / `m_renderPaused`，并把渲染模式、显示风格、多视图、坐标轴、网格、剔除、LOD、法线长度、裁剪面、选中项、背景色逐项设进 `RhiRenderer`。
+4. `takePendingDiffuseTexture()` 取漫反射贴图；`takeUploadResetRequest()` 重置网格上传标志。
+5. `takeScreenshotRequest()` 置本帧抓帧标志；上一帧抓到的 `m_grabbedImage` 经 `deliverScreenshot()` 队列投递给 GUI 线程保存。
 
-```cmake
-# CMakeLists.txt：着色器编译
-qt_add_shaders(ModelViewer "model_shaders"
-    GLSL "310 es,410"
-    HLSL 50
-    MSL 12
-    FILES
-        shaders/phong.vert
-        shaders/phong.frag
-        shaders/pbr.vert
-        shaders/pbr.frag
-        shaders/wireframe.vert
-        shaders/wireframe.frag
-        shaders/shadow.vert
-        shaders/shadow.frag
-        shaders/skybox.vert
-        shaders/skybox.frag
-        shaders/normal_mobile.vert
-        shaders/normal_mobile.frag
-)
-```
+### 8.3 后端与着色器
+
+`main_mobile.cpp` 按 `SDK_INT > 31` 选 Vulkan，否则 GLES 3.1（`AndroidManifest.xml` 声明 `glEsVersion 0x00030001`，Vulkan feature 声明为 non-required）。两套后端共用 `qt_add_shaders(... GLSL "460,310 es" HLSL 50 MSL 12 PRECOMPILE OPTIMIZE ...)` 产出的 qsb；`*.geom` 不在编译清单内，法线/线框线段由 CPU 生成。
+
+### 8.4 截图 readback
+
+- 绘制完成后从离屏颜色纹理 `colorTexture()` 读回，目标格式 `QImage::Format_RGBA8888`。
+- `QRhi::OpenGLES2`：走栈上 `QRhiReadbackResult`，`resourceUpdate` 时同步完成，立即组装图像。
+- Vulkan 等异步后端：`new QRhiReadbackResult` + `completed` 回调只置 `m_readbackReady`，并通过 `QMetaObject::invokeMethod(item, ..., Qt::QueuedConnection)` 再请求一帧；下一帧 `render()` 开头组装图像（避免在回调里析构自身）。上一笔 readback 未回来时保留请求下一帧重试。
+- 图像在随后的 `synchronize()` 交付给 Bridge，`saveScreenshotToFile()` 在 GUI 线程写文件：优先 `PicturesLocation`，失败回退 `AppLocalDataLocation/Pictures`，文件名 `modelviewer_<yyyyMMdd_HHmmss>.png`。
+
+### 8.5 FPS 与统计
+
+`MobileRhiItemRenderer` 用 1 秒窗口统计 FPS，凑够一秒后从 `RhiRenderer::stats()` 取对象/绘制/剔除/DC/三角/LOD 分布，经 `MobileViewerBridge::setStatsSnapshot()`（跨线程 queued 信号）拼成 `statsText`，显示在底部 HUD。文本不变时不发 `statsTextChanged`，避免 QML 无谓重绑。
 
 ---
 
-## 七、性能优化策略
+## 九、性能与后台策略
 
-### 7.1 移动端 LOD 策略
+| 策略 | 实际实现 |
+|---|---|
+| 动画 | `QTimer` 间隔 16ms（约 60fps），只在播放时运行；空闲不重绘 |
+| 后台暂停 | 构造时连接 `QGuiApplication::applicationStateChanged` → `setRenderPaused(state != Qt::ApplicationActive)`；暂停时停动画定时器，`render()` 早退跳过 GPU 工作 |
+| 大模型加载 | `QtConcurrent::run` + `QFutureWatcher`，UI 显示 `BusyIndicator` |
+| 视锥剔除 / 距离 LOD | `setCullingEnabled` / `setLodEnabled` 默认 true，面板可关 |
+| MSAA | `setSampleCount(1)` 默认关闭，QML 可设 2/4 |
+| 帧诊断 | 设置 `MYSIC_QSG_TIMING` 环境变量后打开 `QSG_RENDER_TIMING` / `QSG_INFO` |
 
-移动端 GPU 算力有限，对超过阈值面数的模型自动降级：
+注意：**没有**低电量自动降帧、`QQuickWindow::setFramesPerSecond`、加载时自动减面、按平台选择 ETC2/ASTC 纹理格式等逻辑；这些只出现在早期设计稿里。
 
-```cpp
-// src/loader/ModelLoader.cpp 新增移动端预处理
-#ifdef Q_OS_ANDROID
-    // Android：超过 200K 三角面时启用 Assimp 简化
-    constexpr unsigned int kMobileMaxTris = 200'000;
-    if (totalTris > kMobileMaxTris) {
-        postProcessFlags |= aiProcess_OptimizeMeshes
-                         |  aiProcess_OptimizeGraph;
-        // SimplifyMesh 参数：保留 50% 面数
-        ai_real simplifyFactor = float(kMobileMaxTris) / totalTris * 2.0f;
-        importer.SetPropertyFloat(AI_CONFIG_PP_LBW_MAX_WEIGHTS, simplifyFactor);
-    }
-#endif
-```
+---
 
-### 7.2 纹理压缩
+## 十、调试与故障排查
 
-| 平台 | 格式 | 说明 |
+### 10.1 典型问题与实际修复
+
+| 现象 | 原因 | 处理 |
 |---|---|---|
-| Android (OpenGL ES) | ETC2 / ASTC | 硬件解码，运行时零额外内存 |
-| iOS (Metal) | ASTC 4×4 | 所有 A8 以上 SoC 均支持 |
+| `implicit instantiation of undefined template 'QFutureWatcher<ModelAsset>'` | 只包含了 `<QtConcurrent/QtConcurrentRun>`，`qfuture.h` 只有前置声明 | 在 `MobileViewerBridge.cpp` 增加 `#include <QFutureWatcher>` |
+| `reference to type 'const QPoint' could not bind to ... 'const QPoint (int, int)'` | `const QPoint current(int(x), int(y));` 被解析成函数声明（most vexing parse） | 改成 `const QPoint current{int(x), int(y)};` |
+| `undefined symbol: MobileFileHelper::pickModel()` | `MobileFileHelper_android.cpp` 的 `#if defined(Q_OS_ANDROID)` 在 include 之前，宏未定义，整个文件被跳过 | 在 `#if` 前先 `#include <QtCore/qglobal.h>` |
+| `Cannot find application binary in build dir .../libModelViewer_arm64-v8a.so` | Debug 缓存带了 `CMAKE_DEBUG_POSTFIX=d`，产物成 `libModelViewerd_arm64-v8a.so` | Android 分支强制 `CMAKE_DEBUG_POSTFIX ""`（FORCE） |
+| `UnsatisfiedLinkError: libomp.so not found` | Android 链接了 `OpenMP::OpenMP_CXX`，但 NDK 的 libomp.so 没进 APK | Android 分支不链接 OpenMP |
+| `QQmlApplicationEngine failed to load component ... No such file or directory` | QML 资源落在 `:/ModelViewer/...`，入口却加载 `:/qt/qml/ModelViewer/...` | `qt_add_qml_module` 显式 `RESOURCE_PREFIX "/qt/qml"` |
+| `FORTIFY: pthread_mutex_lock called on a destroyed mutex` + `Fatal signal 6` in RenderThread | 上面的 QML 失败导致 main() 立即返回，渲染线程仍在活动 | 修复根因后消失；不要把它当第一现场 |
+| bat 打印 `xxx is not recognized as an internal or external command` | UTF-8 中文被 cmd 按系统 ANSI 代码页拆断 | `run.bat` 保持纯 ASCII |
 
-```cpp
-// src/renderer/RhiRenderer.cpp — 移动端纹理上传
-QRhiTexture::Format pickTextureFormat(bool hasAlpha)
-{
-#if defined(PLATFORM_ANDROID)
-    return hasAlpha ? QRhiTexture::ETC2_RGBA8 : QRhiTexture::ETC2_RGB8;
-#elif defined(PLATFORM_IOS)
-    return hasAlpha ? QRhiTexture::ASTC_4x4 : QRhiTexture::ASTC_4x4;
-#else
-    return QRhiTexture::RGBA8;
-#endif
-}
+### 10.2 常用 adb 命令
+
+```bash
+adb shell pm list packages | grep ModelViewer
+adb shell cmd package resolve-activity --brief org.qtproject.example.ModelViewer
+adb shell am start -W -n org.qtproject.example.ModelViewer/org.qtproject.qt.android.bindings.QtActivity
+adb shell pidof -s org.qtproject.example.ModelViewer
+adb logcat -d -b crash -t 200
 ```
 
-### 7.3 帧率控制
-
-移动端默认 60fps，当电量 ≤ 20% 时降至 30fps：
-
-```cpp
-// src/mobile/MobileViewerBridge.cpp
-void MobileViewerBridge::onBatteryLevelChanged(int level)
-{
-    const int fps = (level <= 20) ? 30 : 60;
-    m_rhiItem->setUpdateBehavior(fps == 30
-        ? QQuickRhiItem::NoExplicitSync
-        : QQuickRhiItem::UseExplicitSync);
-    // 通知 QQuickWindow 刷新节流
-    if (auto* win = m_rhiItem->window())
-        win->setFramesPerSecond(fps);
-}
-```
-
-### 7.4 离屏时暂停渲染
-
-```cpp
-// 监听 Qt::ApplicationState 减少后台 GPU 占用
-connect(qApp, &QGuiApplication::applicationStateChanged,
-        this, [this](Qt::ApplicationState state) {
-    m_renderPaused = (state != Qt::ApplicationActive);
-});
-
-void MobileRhiItemRenderer::render(QRhiCommandBuffer* cb)
-{
-    if (m_bridge && m_bridge->isRenderPaused()) return;
-    // ... 正常渲染
-}
-```
+`run.bat` 已封装以上流程；按 Ctrl+C 结束实时日志后会再打印一次 crash 缓冲。
 
 ---
 
-## 八、平台原生集成
+## 十一、与早期设计稿的差异 / 未实现项
 
-### 8.1 Android Manifest
+下面这些出现在早期 `ModelViewer-Qt6-Android改造实施计划.md` / 本文档旧稿里，但**当前代码中不存在**，不要按它们理解或继续实现：
 
-```xml
-<!-- android/AndroidManifest.xml -->
-<?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android"
-    package="com.example.modelviewer">
+| 旧设计内容 | 当前实际情况 |
+|---|---|
+| iOS 分支、`ios/Info.plist`、`MobileFileHelper_ios.mm` | 未实现；根 CMakeLists 只有 `if(IOS) message(...)` 占位 |
+| `MobileGestureHandler.h/.cpp`、DPI 灵敏度系数 | 未实现；手势直接在 QML + Bridge + Camera 内完成 |
+| `QML_ELEMENT` 宏注册 `RhiView` | 未使用；`main_mobile.cpp` 用 `qmlRegisterType` 手动注册 |
+| `NOGEOMSHADER` / `QT_RHI_GLES_COMPAT` 编译宏、`normal_mobile.vert/frag` | 不存在；统一走 qsb 的 `310 es` / SPIR-V 变体，线段由 CPU 生成 |
+| 加载时 Assimp `SimplifyMesh`、200K 面阈值 | 不存在；`ModelLoader` 只有同步 `loadCPU()` |
+| 低电量降 30fps、`onBatteryLevelChanged` | 不存在 |
+| ETC2/ASTC 纹理上传、`pickTextureFormat` | 不存在 |
+| `qrc:/models/*.obj` 内置模型、缩略图 | 不存在；演示内容是参数曲面 |
+| `package="com.example.modelviewer"`、`READ_EXTERNAL_STORAGE` 权限、`VIEW` intent-filter | 不存在；SAF 免权限，只有 MAIN/LAUNCHER |
+| `qml/` 在仓库根目录、`shaders/` 在仓库根目录 | 实际在 `src/qml/`、`src/shaders/` |
+| `modelLoaded(const QString&)`、`pickCancelled()` | 实际为 `modelLoaded(label, meshCount, triangles)`、`filePickCancelled()` |
+| `--target apk`（`scripts/build_android.ps1`） | Qt 6.11 生成的目标是 `ModelViewer_make_apk`；脚本该处已过时 |
 
-    <!-- 读取外部存储（Android 12 以下）-->
-    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"
-        android:maxSdkVersion="32" />
-
-    <!-- Android 13+ 细分权限 -->
-    <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
-
-    <!-- OpenGL ES 3.1 要求 -->
-    <uses-feature android:glEsVersion="0x00030001" android:required="true" />
-    <uses-feature android:name="android.hardware.vulkan.level" android:required="false" />
-
-    <application
-        android:label="ModelViewer"
-        android:icon="@drawable/icon"
-        android:hardwareAccelerated="true">
-
-        <activity
-            android:name="org.qtproject.qt.android.bindings.QtActivity"
-            android:exported="true"
-            android:screenOrientation="fullSensor"
-            android:configChanges="orientation|screenSize|keyboardHidden">
-
-            <!-- 声明可接收的 3D 文件 MIME 类型 -->
-            <intent-filter>
-                <action android:name="android.intent.action.VIEW" />
-                <category android:name="android.intent.category.DEFAULT" />
-                <data android:mimeType="model/obj" />
-                <data android:mimeType="model/gltf+json" />
-                <data android:mimeType="model/gltf-binary" />
-                <data android:mimeType="application/octet-stream" />
-            </intent-filter>
-        </activity>
-    </application>
-</manifest>
-```
-
-### 8.2 iOS Info.plist
-
-```xml
-<!-- ios/Info.plist（关键条目）-->
-<key>CFBundleDocumentTypes</key>
-<array>
-    <dict>
-        <key>CFBundleTypeName</key><string>3D Model</string>
-        <key>LSItemContentTypes</key>
-        <array>
-            <string>public.geometry-definition-format</string> <!-- OBJ -->
-            <string>com.khronos.gltf</string>
-            <string>com.autodesk.fbx</string>
-            <string>org.stereolithography.stl</string>
-        </array>
-        <key>CFBundleTypeRole</key><string>Viewer</string>
-    </dict>
-</array>
-
-<!-- 访问 Files App 中的文件 -->
-<key>UIFileSharingEnabled</key><true/>
-<key>LSSupportsOpeningDocumentsInPlace</key><true/>
-
-<!-- 支持横竖屏 -->
-<key>UISupportedInterfaceOrientations</key>
-<array>
-    <string>UIInterfaceOrientationPortrait</string>
-    <string>UIInterfaceOrientationLandscapeLeft</string>
-    <string>UIInterfaceOrientationLandscapeRight</string>
-</array>
-
-<!-- Metal GPU 要求 -->
-<key>UIRequiredDeviceCapabilities</key>
-<array><string>metal</string></array>
-```
-
-### 8.3 `MobileViewerBridge` 核心接口
-
-```cpp
-// src/mobile/MobileViewerBridge.h
-#pragma once
-#include <QObject>
-#include <QVariantMap>
-#include "renderer/RhiRenderer.h"
-#include "mobile/MobileGestureHandler.h"
-
-class MobileViewerBridge : public QObject
-{
-    Q_OBJECT
-public:
-    explicit MobileViewerBridge(QObject* parent = nullptr);
-
-    bool isRenderPaused() const { return m_renderPaused; }
-
-public slots:
-    // QML 调用
-    void loadModel(const QString& path);
-    void setRenderMode(int mode);           // RhiRenderer::RenderMode
-    void setOrthographic(bool ortho);
-    void resetView();
-    void fitView();
-    void rotate(float dx, float dy);
-    void pan(float dx, float dy);
-    void zoom(float scaleDelta);
-    void pickObject(float x, float y);
-    void saveScreenshot();
-
-signals:
-    void modelLoaded(const QString& modelName);
-    void loadError(const QString& message);
-    void loadProgress(float progress);      // 0.0–1.0，用于进度条
-    void renderModeChanged(int mode);
-    void screenshotSaved(const QString& path);
-
-private:
-    RhiRenderer*         m_renderer    = nullptr;
-    MobileGestureHandler* m_gesture   = nullptr;
-    bool                  m_renderPaused = false;
-};
-```
+此外，旧稿把 `QQuickRhiItemRenderer::initialize` 写成 `initialize(QRhi*, QRhiRenderTarget*, QRhiCommandBuffer*, const QSize&)`，实际签名是 `initialize(QRhiCommandBuffer* cb)`，需要 rhi/renderTarget 时用其访问器。
 
 ---
 
-## 九、CMake 构建配置
-
-### 9.1 Android 快速构建脚本 `scripts/build_android.sh`
-
-```bash
-#!/usr/bin/env bash
-set -e
-
-QT6_ANDROID="${QT6_ANDROID_PATH:-$HOME/Qt/6.9.3/android_arm64_v8a}"
-NDK="${ANDROID_NDK_ROOT:-$HOME/Android/Sdk/ndk/26.1.10909125}"
-BUILD_DIR="build-android"
-
-cmake -B "$BUILD_DIR" \
-  -DCMAKE_TOOLCHAIN_FILE="$NDK/build/cmake/android.toolchain.cmake" \
-  -DANDROID_ABI=arm64-v8a \
-  -DANDROID_PLATFORM=android-26 \
-  -DCMAKE_PREFIX_PATH="$QT6_ANDROID" \
-  -DASSIMP_BUILD_TESTS=OFF \
-  -DASSIMP_BUILD_ALL_IMPORTERS_BY_DEFAULT=OFF \
-  -DASSIMP_BUILD_OBJ_IMPORTER=ON \
-  -DASSIMP_BUILD_FBX_IMPORTER=ON \
-  -DASSIMP_BUILD_GLTF_IMPORTER=ON \
-  -DASSIMP_BUILD_STL_IMPORTER=ON \
-  -DASSIMP_BUILD_3DS_IMPORTER=ON \
-  -DASSIMP_BUILD_COLLADA_IMPORTER=ON \
-  -S .
-
-cmake --build "$BUILD_DIR" --target apk -j$(nproc)
-echo "APK: $BUILD_DIR/android-build/build/outputs/apk/release/"
-```
-
-### 9.2 iOS 快速构建脚本 `scripts/build_ios.sh`
-
-```bash
-#!/usr/bin/env bash
-set -e
-
-QT6_IOS="${QT6_IOS_PATH:-$HOME/Qt/6.9.3/ios}"
-BUILD_DIR="build-ios"
-
-cmake -B "$BUILD_DIR" \
-  -GXcode \
-  -DCMAKE_SYSTEM_NAME=iOS \
-  -DCMAKE_PREFIX_PATH="$QT6_IOS" \
-  -DCMAKE_OSX_DEPLOYMENT_TARGET=16.0 \
-  -DASSIMP_BUILD_TESTS=OFF \
-  -DASSIMP_BUILD_ALL_IMPORTERS_BY_DEFAULT=OFF \
-  -DASSIMP_BUILD_OBJ_IMPORTER=ON \
-  -DASSIMP_BUILD_FBX_IMPORTER=ON \
-  -DASSIMP_BUILD_GLTF_IMPORTER=ON \
-  -DASSIMP_BUILD_STL_IMPORTER=ON \
-  -DASSIMP_BUILD_3DS_IMPORTER=ON \
-  -DASSIMP_BUILD_COLLADA_IMPORTER=ON \
-  -S .
-
-echo "请使用 Xcode 打开 $BUILD_DIR/ModelViewer.xcodeproj 进行签名和部署"
-open "$BUILD_DIR/ModelViewer.xcodeproj"
-```
-
-### 9.3 最终目录结构（增量）
+## 附录：实际目录结构
 
 ```
 ModelViewer-Qt6/
-├── src/
-│   ├── core/               # 不变
-│   ├── loader/             # 新增移动端 LOD 预处理守卫
-│   ├── math/               # 不变
-│   ├── renderer/           # 新增 NOGEOMSHADER 守卫
-│   ├── ui/                 # 桌面端，不变
-│   ├── mobile/             # 新增
-│   │   ├── MobileViewerBridge.h/.cpp
-│   │   ├── MobileGestureHandler.h/.cpp
-│   │   ├── MobileFileHelper.h/.cpp
-│   │   ├── MobileFileHelper_android.cpp
-│   │   ├── MobileFileHelper_ios.mm
-│   │   └── MobileRhiItem.h/.cpp
-│   ├── main.cpp            # 桌面端入口，不变
-│   └── main_mobile.cpp     # 新增，移动端入口
-├── qml/                    # 新增
-│   ├── MobileViewer.qml
-│   ├── ViewerToolBar.qml
-│   ├── GestureArea.qml
-│   ├── ModelListPage.qml
-│   └── RenderModePanel.qml
-├── shaders/
-│   ├── normal_mobile.vert  # 新增，无几何着色器法线渲染
-│   └── normal_mobile.frag
+├── CMakeLists.txt                 # 依赖、Qt 标准配置、插件子目录
+├── run.bat                        # Android adb 启动 + 过滤日志（纯 ASCII）
 ├── android/
-│   └── AndroidManifest.xml # 新增
-├── ios/
-│   └── Info.plist          # 新增
+│   ├── AndroidManifest.xml        # QtActivity / lib_name / GLES 3.1 / Vulkan feature
+│   └── res/drawable/icon.png
 ├── scripts/
-│   ├── build_android.sh    # 新增
-│   └── build_ios.sh        # 新增
-└── CMakeLists.txt          # 扩展，添加移动端条件块
+│   └── build_android.ps1          # Windows 参数化 CMake 配置脚本
+├── docs/
+│   ├── ModelViewer-Qt6-移动端扩展文档.md   # 本文
+│   └── ModelViewer-Qt6-Android改造实施计划.md  # 早期计划（部分已过时）
+└── src/
+    ├── CMakeLists.txt             # 桌面 / Android 分支、着色器清单
+    ├── main.cpp                   # 桌面入口
+    ├── main_mobile.cpp            # Android 入口
+    ├── core/  loader/  math/  renderer/   # 与桌面共用的核心代码
+    ├── ui/    net/    plugin/     # 仅桌面编译
+    ├── mobile/
+    │   ├── MobileViewerBridge.h/.cpp
+    │   ├── MobileFileHelper.h/.cpp
+    │   ├── MobileFileHelper_android.cpp
+    │   └── MobileRhiItem.h/.cpp
+    ├── qml/
+    │   ├── MobileViewer.qml
+    │   ├── ViewerToolBar.qml
+    │   ├── GestureArea.qml
+    │   ├── ModelListPage.qml
+    │   └── RenderModePanel.qml
+    └── shaders/
 ```
-
----
-
-> **兼容性说明**
-> - Android：minSdk 26（Android 8.0），targetSdk 34，OpenGL ES 3.1，Vulkan 可选
-> - iOS：部署目标 16.0，Metal，支持 iPhone 和 iPad（Universal）
-> - 桌面端原有代码路径零改动，移动端完全通过条件编译隔离

@@ -6,6 +6,8 @@ layout(location = 2) in  vec4 vLightClip;
 layout(location = 3) in  vec2 vTexCoord;
 layout(location = 0) out vec4 outColor;
 
+// 显式命名 UBO 实例：qsb 自动生成的实例名（如 _171）跨阶段可能撞名，
+// 造成 "Uniform _171 type mismatch with other stage" 链接失败。
 layout(std140, binding = 0) uniform FrameUBO {
     mat4 model; mat4 view; mat4 projection; mat4 normalMatrix;
     vec3 lightPos;   float _p0;
@@ -13,13 +15,13 @@ layout(std140, binding = 0) uniform FrameUBO {
     vec3 viewPos;    float _p2;
     mat4 lightSpace;
     mat4 shadowBias;
-};
+} frameUbo;
 
 layout(std140, binding = 1) uniform MaterialUBO {
     vec3  ambient;   float shininess;
     vec3  diffuse;   float metallic;
     vec3  specular;  float roughness;
-};
+} materialUbo;
 
 // 深度比较采样器（与 QRhiSampler::setTextureCompareOp 配合）
 layout(binding = 2) uniform sampler2DShadow shadowMap;
@@ -44,15 +46,15 @@ float sampleShadow(vec4 lightClip) {
 
 void main() {
     vec3 N = normalize(fragNormal);
-    vec3 L = normalize(lightPos - fragPos);
-    vec3 V = normalize(viewPos - fragPos);
+    vec3 L = normalize(frameUbo.lightPos - fragPos);
+    vec3 V = normalize(frameUbo.viewPos - fragPos);
     vec3 R = reflect(-L, N);
 
     float shadow = sampleShadow(vLightClip);
 
-    vec3 a = ambient * lightColor;
-    vec3 d = diffuse * lightColor * max(dot(N, L), 0.0) * shadow;
-    vec3 s = specular * lightColor * pow(max(dot(R, V), 0.0), max(shininess, 1.0)) * shadow;
+    vec3 a = materialUbo.ambient * frameUbo.lightColor;
+    vec3 d = materialUbo.diffuse * frameUbo.lightColor * max(dot(N, L), 0.0) * shadow;
+    vec3 s = materialUbo.specular * frameUbo.lightColor * pow(max(dot(R, V), 0.0), max(materialUbo.shininess, 1.0)) * shadow;
 
     outColor = vec4((a + d + s) * texture(diffuseMap, vTexCoord).rgb, 1.0);
 }

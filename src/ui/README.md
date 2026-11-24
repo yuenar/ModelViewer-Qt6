@@ -1,6 +1,20 @@
 # UI 模块
 
-本模块提供 ModelViewer 的用户界面，基于 Qt Widgets 框架实现，包含主窗口、渲染控件和各种设置对话框。
+本模块提供 ModelViewer **桌面端**的用户界面，基于 Qt Widgets 框架实现，包含主窗口、渲染控件和各种设置对话框。Android 不编译本目录，其界面在 `src/qml/`（Qt Quick）与 `src/mobile/`（桥接层）中。
+
+## 移动端 UI（Qt Quick，Android）
+
+MobileRhiItem（`src/mobile/MobileRhiItem.h/.cpp`）是 QML 中的 3D 控件，注册名 `RhiView`，替代桌面的 `RhiWidget`；桥接对象 `ViewerBridge` / `FileHelper` 在 `main_mobile.cpp` 中注册为 QML 单例。
+
+| QML 文件 | 职责 |
+|---|---|
+| `MobileViewer.qml` | 主界面：`StackView`、`RhiView`、手势层、底部统计 HUD、动画控制、提示横幅 |
+| `ViewerToolBar.qml` | 打开模型 / 渲染面板 / 适配视图 / 投影切换 / 截图 |
+| `GestureArea.qml` | 单指旋转、双指平移与捏合缩放、双击适配、长按拾取 |
+| `ModelListPage.qml` | 5 种参数曲面 + 最近打开 + 系统文件选择器 |
+| `RenderModePanel.qml` | 右侧 Drawer：12 渲染模式、4 显示风格、显示选项 |
+
+移动端使用 `QQuickStyle::setStyle("Material")` 与 `Material.Dark` 主题；与桌面 UI 不共享代码，只共享 C++ 渲染核心与桥接数据。
 
 ## 文件说明
 
@@ -110,6 +124,7 @@ private:
 - **S** - 切换阴影
 
 ### 菜单结构
+（以下为桌面端；移动端对应工具栏 + Drawer + StackView，见上表）
 ```
 文件(F)
 ├── 打开模型(O)...
@@ -161,10 +176,8 @@ private:
 ## 主题和样式
 
 ### 外观设置
-- **深色主题** - 默认深色界面
-- **浅色主题** - 可选浅色界面
-- **自定义样式** - 支持 QSS 样式表
-- **高 DPI 支持** - 4K 显示器适配
+- **桌面**：深色主题 / 浅色主题 / QSS 样式表，4K 高 DPI 适配
+- **移动端**：`QQuickStyle::setStyle("Material")` + `Material.theme: Material.Dark`，背景 `#0e0e14`
 
 ### 字体和图标
 - **系统字体** - 跟随系统设置
@@ -221,7 +234,8 @@ materialDialog.exec();
 
 ## 依赖项
 
-- **Qt Widgets** - 用户界面框架
+- **Qt Widgets** - 桌面用户界面框架（移动端不链接）
+- **Qt Quick / Quick Controls 2 / QML** - 移动端界面（注册在 URI `ModelViewer`）
 - **Qt Gui** - 图形和事件处理
 - **Renderer 模块** - 渲染功能调用
 - **Core 模块** - 数据结构访问
