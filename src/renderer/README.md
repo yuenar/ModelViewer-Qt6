@@ -2,6 +2,15 @@
 
 本模块是 ModelViewer 的核心渲染引擎，基于 Qt RHI（Rendering Hardware Interface）实现跨平台 GPU 渲染。
 
+## 桌面 / 移动端共用
+
+桌面 `RhiWidget` 与 Android `MobileRhiItem` 都直接复用本模块的 `RhiRenderer`，渲染核心零改动：
+- 移动端 `MobileRhiItemRenderer` 持有 `RhiRenderer*`，在 `synchronize()` 中把 Bridge 快照
+  逐项设进渲染器，在 `render()` 中调用 `m_renderer->render(cb, meshes, camera, light, material)`；
+- 网格 `RhiMesh` 的 GPU 缓冲在渲染线程创建/释放；`BufferPool` 与统计 `RenderStats` 同样共用；
+- Android 可走 Vulkan（API > 31）或 OpenGL ES 3.1，着色器由 `qt_add_shaders` 一次编译出
+  GLSL 460 / 310 es、HLSL 50、MSL 12（含 SPIR-V 变体）。
+
 ## 文件说明
 
 ### RhiRenderer.h/cpp
@@ -14,14 +23,11 @@
 - 渲染命令录制和提交
 - 多种渲染效果的实现
 
-**主要渲染管线：**
-- Phong 着色管线
-- 线框模式管线
-- 法线可视化管线
-- 阴影映射管线
-- 天空盒渲染管线
-- 裁剪平面管线
-- 后处理效果管线
+**主要渲染管线（`RhiRenderer::RenderMode`，0–11）：**
+Phong、Wireframe、Normals、FaceNormals、VertexNormals、FlatShading、PBR、
+ShadowMapping、Skybox、Selection、ClippingPlane、SplitScreen；另叠加
+`DisplayStyle`（0–3：Shaded / Wireframe / WireShaded / Realistic）。
+编译到 qsb 的辅助着色器还包括 cap、text3d、axis、post、wire_overlay 等。
 
 ### RhiMesh.h/cpp
 GPU 端网格数据管理类。
@@ -51,7 +57,7 @@ GPU 端网格数据管理类。
 - **色调映射** - HDR 到 LDR 转换
 - **伽马校正** - 颜色空间转换
 - **FXAA** - 快速近似抗锯齿
-- **景深效果** - 焦点模糊
+- **基于深度的 AO** - 深度驱动的暗角/环境光遮蔽后处理（`post.vert/frag`）
 
 ## 技术架构
 
@@ -61,6 +67,8 @@ Qt RHI 提供了统一的图形 API 抽象：
 - **DirectX 11/12** - Windows 平台
 - **Vulkan** - 高性能现代 API
 - **Metal** - macOS/iOS 平台
+- **Android 后端选择** - `main_mobile.cpp` 读取 `SDK_INT`：`> 31` 用 Vulkan，否则 OpenGL ES 3.1
+  （通过 `QSG_RHI_BACKEND` 设置，`QSurfaceFormat` 指定 ES 3.1 下限）
 
 ### 渲染管线设计
 ```cpp
@@ -82,10 +90,11 @@ private:
 ```
 
 ### 着色器管理
-- **Qt Shader Tools** - 自动编译着色器
-- **多语言支持** - GLSL、HLSL、MSL
-- **热重载** - 开发时着色器更新
-- **变体系统** - 条件编译和宏定义
+- **Qt Shader Tools** - `qt_add_shaders` 在构建时预编译为 qsb（`PRECOMPILE` + `OPTIMIZE`）
+- **变体** - `GLSL "460,310 es"` / `HLSL 50` / `MSL 12`；桌面与 Android 共用同一份
+  `MODELVIEWER_SHADER_FILES` 清单
+- **几何着色器** - `*.geom` 源文件保留但不参与编译；法线/线框线段由 CPU 生成
+- **热重载** - 桌面 Shader Editor 运行时用 `qsb` 编译并重建管线（移动端无此功能）
 
 ## 渲染流程
 
@@ -140,18 +149,13 @@ private:
 ## 使用示例
 
 ```cpp
-// 初始化渲染器
-RhiRenderer renderer;
-renderer.initialize(rhi, swapChain);
-
-// 加载网格
-RhiMesh* mesh = renderer.createMesh(cpuMesh);
-
-// 渲染一帧
-renderer.beginFrame();
-renderer.setCamera(camera);
-renderer.renderMesh(mesh);
-renderer.endFrame();
+// 移动端（MobileRhiItemRenderer::synchronize + render）的实际调用方式：
+renderer->setRenderMode(bridge.renderMode());
+renderer->setDisplayStyle(bridge.displayStyle());
+renderer->setAxisVisible(bridge.axisVisible());
+// ... 其余参数逐项设置 ...
+renderer->setRenderTarget(renderTarget());
+renderer->render(cb, meshes, camera, light, material);
 ```
 
 ## 依赖项

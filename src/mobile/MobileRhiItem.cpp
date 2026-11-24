@@ -14,6 +14,7 @@
 
 #include "MobileRhiItem.h"
 
+#include <QDebug>
 #include <QVector>
 #include <rhi/qrhi.h>
 
@@ -55,6 +56,8 @@ QQuickRhiItemRenderer* MobileRhiItem::createRenderer() {
 // ── MobileRhiItemRenderer（渲染线程）───────────────────────────────
 
 MobileRhiItemRenderer::~MobileRhiItemRenderer() {
+  delete m_readback;
+  m_readback = nullptr;
   // 与桌面 ~RhiWidget 相同的释放序列（渲染线程执行）：
   // 先把网格 GPU 缓冲归还（不删除 CPU 数据），再销毁渲染器
   if (m_renderer) {
@@ -70,33 +73,47 @@ MobileRhiItemRenderer::~MobileRhiItemRenderer() {
 }
 
 void MobileRhiItemRenderer::initialize(QRhiCommandBuffer* cb) {
-  // QRhiWidget::initialize 的同款两分支：首次创建 / 设备或目标变化重建
+  // 注意：Qt 每次 sync 都会调用本函数（并非只在首次/尺寸变化时），因此
+  // 不能无条件重建管线——Vulkan 下销毁仍在飞行帧中使用的管线是未定义行为。
+  // 只有渲染目标对象真正换了（格式/重建）才重建设备资源。
+  QRhiRenderTarget* rt = renderTarget();
   if (!m_renderer) {
-    if (cb) {
+    // 目标尚未就绪时推迟到 render() 里补建，避免永久黑屏
+    if (cb && rt) {
       initializeRenderer(cb);
     } else {
-      // cb 缺失（窗口刚暴露等场景）：推迟到 render() 里完成
       m_pendingInit = true;
     }
-  } else {
-    m_renderer->setRenderTarget(renderTarget());
+    return;
+  }
+  if (rt && rt != m_lastRt) {
+    m_renderer->setRenderTarget(rt);
     m_renderer->rebuildPipelines();
   }
+  m_lastRt = rt;
 }
 
 void MobileRhiItemRenderer::initializeRenderer(QRhiCommandBuffer* cb) {
   if (m_renderer || !rhi() || !renderTarget()) {
+    static bool warned = false;
+    if (!warned) {
+      warned = true;
+      qWarning() << "[RhiItem] initializeRenderer skipped: rhi"
+                 << (rhi() != nullptr) << "rt" << (renderTarget() != nullptr);
+    }
     return;
   }
   m_renderer = new RhiRenderer(rhi(), renderTarget());
+  m_lastRt = renderTarget();
   m_renderer->initialize(cb);
   m_pendingInit = false;
 }
 
 void MobileRhiItemRenderer::synchronize(QQuickRhiItem* item) {
   auto* rhiItem = static_cast<MobileRhiItem*>(item);
+  m_item = rhiItem;
   m_bridge = rhiItem->bridge();
-  if (!m_bridge || !m_renderer) {
+  if (!m_bridge) {
     return;
   }
 
@@ -116,6 +133,12 @@ void MobileRhiItemRenderer::synchronize(QQuickRhiItem* item) {
   m_material = m_bridge->material();
   m_meshes = m_bridge->meshes();  // 旧对象在 retired 队列里保活，指针稳定
   m_renderPaused = m_bridge->isRenderPaused();
+
+  // 渲染器可能尚未创建（Vulkan 下 initialize() 拿到 cb 的时机不同）：
+  // 场景快照照常更新，render() 补建渲染器后本帧即可直接使用
+  if (!m_renderer) {
+    return;
+  }
 
   m_renderer->setRenderMode(m_bridge->renderMode());
   m_renderer->setDisplayStyle(m_bridge->displayStyle());
@@ -151,14 +174,46 @@ void MobileRhiItemRenderer::synchronize(QQuickRhiItem* item) {
 }
 
 void MobileRhiItemRenderer::render(QRhiCommandBuffer* cb) {
-  if (m_pendingInit && cb) {
-    initializeRenderer(cb);
+  // 异步后端（Vulkan）上一帧 readback 已就绪：在此组装图像，
+  // 下一次 synchronize() 交付给 Bridge（GUI 线程）
+  if (m_readback && m_readbackReady) {
+    const int bytes = m_readbackSize.width() * m_readbackSize.height() * 4;
+    if (m_readbackSize.isValid() && m_readback->data.size() >= bytes) {
+      m_grabbedImage =
+          QImage(reinterpret_cast<const uchar*>(m_readback->data.constData()),
+                 m_readbackSize.width(), m_readbackSize.height(),
+                 QImage::Format_RGBA8888)
+              .copy();
+    }
+    delete m_readback;
+    m_readback = nullptr;
+    m_readbackReady = false;
+  }
+
+  if (m_pendingInit || !m_renderer) {
+    if (cb) {
+      initializeRenderer(cb);
+    }
   }
   if (!m_renderer || !cb) {
+    static bool warned = false;
+    if (!warned) {
+      warned = true;
+      qWarning() << "[RhiItem] render skipped: renderer" << (m_renderer != nullptr)
+                 << "cb" << (cb != nullptr);
+    }
     return;
   }
   if (m_renderPaused) {
     return;  // 后台暂停：跳过 GPU 工作（QQuickRhiItem 按需渲染，无空转）
+  }
+
+  // 渲染目标对象变化（格式/采样数变化时 Qt 会重建 RT）时同步给渲染器
+  QRhiRenderTarget* rt = renderTarget();
+  if (rt && rt != m_lastRt) {
+    m_renderer->setRenderTarget(rt);
+    m_renderer->rebuildPipelines();
+    m_lastRt = rt;
   }
 
   const QSize pixelSize = renderTarget()->pixelSize();
@@ -170,9 +225,8 @@ void MobileRhiItemRenderer::render(QRhiCommandBuffer* cb) {
   // 与桌面 RhiWidget::render 完全一致的核心调用（内部自动上传网格）
   m_renderer->render(cb, m_meshes, m_camera, m_light, m_material);
 
-  // 截图：绘制完成后从离屏颜色纹理读回（GLES 后端同步完成）
-  if (m_grabRequested) {
-    grabFrame(cb);
+  // 截图：绘制完成后从离屏颜色纹理读回（GLES 同步 / Vulkan 异步）
+  if (m_grabRequested && grabFrame(cb)) {
     m_grabRequested = false;
   }
 
@@ -188,32 +242,54 @@ void MobileRhiItemRenderer::render(QRhiCommandBuffer* cb) {
   }
 }
 
-void MobileRhiItemRenderer::grabFrame(QRhiCommandBuffer* cb) {
+bool MobileRhiItemRenderer::grabFrame(QRhiCommandBuffer* cb) {
   QRhiTexture* color = colorTexture();
   if (!color || !rhi()) {
-    return;
+    return false;
   }
   const QSize size = color->pixelSize();
   if (size.isEmpty()) {
-    return;
+    return false;
   }
 
   QRhiResourceUpdateBatch* batch = rhi()->nextResourceUpdateBatch();
   QRhiReadbackDescription desc;
   desc.setTexture(color);
-  QRhiReadbackResult result;
-  batch->readBackTexture(desc, &result);
-  cb->resourceUpdate(batch);
 
-  // OpenGL ES 后端 readback 同步完成；若后续切到 Vulkan/Metal 后端，
-  // 需改用 QRhiReadbackResult::completed 回调交付
-  if (result.data.size() >= size.width() * size.height() * 4) {
-    m_grabbedImage = QImage(
-        reinterpret_cast<const uchar*>(result.data.constData()),
-        size.width(), size.height(), QImage::Format_RGBA8888).copy();
-    // 若真机上出现上下颠倒，在此处 .mirrored() 修正一次即可
+  if (rhi()->backend() == QRhi::OpenGLES2) {
+    // GL 后端：readback 在 resourceUpdate 时同步完成，直接取图
+    QRhiReadbackResult result;
+    batch->readBackTexture(desc, &result);
+    cb->resourceUpdate(batch);
+    if (result.data.size() >= size.width() * size.height() * 4) {
+      m_grabbedImage = QImage(
+          reinterpret_cast<const uchar*>(result.data.constData()),
+          size.width(), size.height(), QImage::Format_RGBA8888).copy();
+    }
+    // 图片在下一次 synchronize() 交给 Bridge（GUI 线程）保存
+    return true;
   }
-  // 图片在下一次 synchronize() 交给 Bridge（GUI 线程）保存
+
+  // Vulkan 等异步后端：数据在帧提交后到达，completed 回调只置位，
+  // 图像在下一帧 render() 开头组装（回调执行期间不能析构结果对象）
+  if (m_readback) {
+    return false;  // 上一次 readback 仍在途，保留请求下一帧重试
+  }
+  m_readback = new QRhiReadbackResult;
+  m_readbackSize = size;
+  m_readbackReady = false;
+  m_readback->completed = [this]() {
+    m_readbackReady = true;
+    // 按需渲染：结果在帧提交后到达，必须再请求一帧才能组装并交付图像
+    if (m_item) {
+      MobileRhiItem* it = m_item;
+      QMetaObject::invokeMethod(
+          it, [it]() { it->update(); }, Qt::QueuedConnection);
+    }
+  };
+  batch->readBackTexture(desc, m_readback);
+  cb->resourceUpdate(batch);
+  return true;
 }
 
 void MobileRhiItemRenderer::flushStats() {

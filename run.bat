@@ -55,7 +55,10 @@ goto WAIT_PID
 :GOT_PID
 echo %LOG% pid = %PID%
 echo %LOG% 5/5 streaming logcat for this pid only (Ctrl+C to stop)
-echo %LOG% muted noise tags: Adreno*, libEGL, Surface, Choreographer, HWUI,
+echo %LOG% Qt app logs use tag "default" and are kept at Verbose (never muted).
+echo %LOG% AdrenoVK-0 / Vulkan tags are kept at Warning so driver errors show.
+echo %LOG% full session is also saved to adb_log.txt next to this script.
+echo %LOG% muted noise tags: AdrenoGLES*, libEGL, Surface, Choreographer, HWUI,
 echo %LOG%   OpenGLRenderer, ActivityThread, ViewRootImpl, MediaCodec*, AAudio*
 echo ======================================================================
 
@@ -63,9 +66,11 @@ rem Filter strategy: "*:I" opens everything at Info+ for this process, then
 rem each "tag:S" silences one noisy system / GPU tag.
 rem NEVER silence libc / DEBUG / AndroidRuntime: the native
 rem "Fatal signal 11" line and the Java exception stack come from there.
-adb logcat --pid=%PID% -v time ^
-    "*:I" "libc:F" "AndroidRuntime:I" ^
-    "AdrenoGLES-0:S" "AdrenoGLES:S" "AdrenoUtils:S" "AdrenoVK-0:S" ^
+rem "default:V" is important: qInfo/qWarning from the app are logged with the
+rem "default" tag; anything below Verbose could hide our diagnostics.
+adb logcat --pid=%PID% -v threadtime ^
+    "*:I" "default:V" "qt:V" "libc:F" "AndroidRuntime:I" ^
+    "AdrenoGLES-0:S" "AdrenoGLES:S" "AdrenoUtils:S" "AdrenoVK-0:W" "Vulkan:V" ^
     "libEGL:S" "OpenGLRenderer:S" "HWUI:S" "Surface:S" "SurfaceFlinger:S" ^
     "Choreographer:S" "BufferQueueConsumer:S" "BufferQueueProducer:S" ^
     "BLASTBufferQueue:S" "ActivityThread:S" "ViewRootImpl:S" ^
@@ -74,7 +79,8 @@ adb logcat --pid=%PID% -v time ^
     "Codec2Client:S" "AAudio:S" "AAudioStream:S" "AudioTrack:S" ^
     "AudioFlinger:S" "AudioSystem:S" "Perf:S" "RENDER_TURBO:S" ^
     "ComputilityLevel:S" "MI-PreRender:S" "IconCustomizer:S" ^
-    "ViewConfiguration:S" "InputMethodManager:S"
+    "ViewConfiguration:S" "InputMethodManager:S" ^
+    | powershell -NoProfile -Command "$input | Tee-Object -FilePath '%~dp0adb_log.txt'"
 
 echo ======================================================================
 echo %LOG% session ended, recent crash buffer entries (empty when no crash):

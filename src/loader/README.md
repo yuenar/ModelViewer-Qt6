@@ -9,15 +9,16 @@
 
 **主要接口：**
 ```cpp
+#include "core/Animation.h"   // ModelAsset 定义在此
+
 class ModelLoader {
 public:
-    QVector<CpuMesh> loadCPU(const QString& filePath);  // 加载模型文件
-    
-private:
-    QVector<CpuMesh> loadWithAssimp(const QString& path);  // 使用 Assimp 加载
-    bool isAssimpFormat(const QString& ext) const;        // 检查文件格式
+    ModelAsset loadCPU(const QString& filePath);  // 同步加载，返回网格 + 动画
 };
 ```
+
+`ModelAsset { QVector<CpuMesh> meshes; QVector<AnimationClip> animations; }` 定义在
+`src/core/Animation.h`。加载失败时 `meshes` 为空。
 
 ### ModelLoader.cpp
 模型加载器的实现文件。
@@ -80,22 +81,22 @@ private:
 
 ## 性能考虑
 
-- 大文件采用流式加载
-- 多线程加载支持
-- 内存池管理
+- `loadCPU()` 是同步接口，本身不创建线程
+- 桌面 / 移动端的不阻塞加载由调用方完成：移动端 `MobileViewerBridge::loadModel()` 用
+  `QtConcurrent::run` + `QFutureWatcher<ModelAsset>`，回调回 GUI 线程更新场景
 - 缓存机制（可扩展）
 
 ## 使用示例
 
 ```cpp
 ModelLoader loader;
-QVector<CpuMesh> meshes = loader.loadCPU("model.obj");
+ModelAsset asset = loader.loadCPU("model.obj");
 
-if (!meshes.isEmpty()) {
-    // 成功加载，处理网格数据
-    for (const auto& mesh : meshes) {
+if (!asset.meshes.isEmpty()) {
+    for (const auto& mesh : asset.meshes) {
         qDebug() << "Loaded mesh with" << mesh.vertices.size() << "vertices";
     }
+    // asset.animations 可直接交给动画系统 / MobileViewerBridge
 }
 ```
 
@@ -104,10 +105,16 @@ if (!meshes.isEmpty()) {
 - **Assimp** - Open Asset Import Library，用于多格式 3D 模型加载
 - **Qt Core** - 用于文件路径处理和容器类
 
+## Android 文件来源
+
+Android 上系统文件选择器返回的是 `content://` URI，Assimp / `QFile` 不能直接读取。
+`MobileFileHelper_android.cpp` 通过 `ContentResolver.openInputStream` 把内容拷贝到
+`<CacheLocation>/modelview_import/<时间戳>[.ext]` 后，`MobileViewer.qml` 才把该本地路径
+传给 `ViewerBridge.loadModel()` → `loadCPU()`。
+
 ## 扩展性
 
 模块设计支持：
 - 添加新的文件格式支持
 - 自定义数据转换规则
-- 加载进度回调
-- 异步加载机制
+- 由调用方实现进度反馈与异步加载（移动端已实现）

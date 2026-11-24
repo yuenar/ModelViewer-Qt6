@@ -17,13 +17,16 @@
 class BoundingBox {
 public:
     void reset();                           // 重置为空包围盒
-    void extend(const QVector3D& point);    // 扩展包围盒以包含点
-    void extend(const BoundingBox& other);   // 合并另一个包围盒
-    bool contains(const QVector3D& point) const;  // 点是否在包围盒内
-    bool intersects(const BoundingBox& other) const;  // 包围盒相交检测
-    BoundingBox transformed(const QMatrix4x4& matrix) const;  // 变换包围盒
+    void expand(const QVector3D& point);    // 扩展包围盒以包含点
+    void expand(const BoundingBox& other);   // 合并另一个包围盒
+    bool isEmpty() const;                    // 是否为空
+    float radius() const;                    // 外接球半径（移动端用于法线长度）
+    // 另提供中心、尺寸、相交检测等接口，详见头文件
 };
 ```
+
+注意方法名是 `expand()` 而不是 `extend()`；移动端 `MobileViewerBridge` 使用
+`expand()` / `radius()` / `isEmpty()` 计算场景包围盒。
 
 ### Camera.h/cpp
 3D 摄像机控制和视图矩阵计算。
@@ -56,6 +59,15 @@ public:
 };
 ```
 
+**交互接口（桌面 RhiWidget 与移动端 Bridge 共用）：**
+`setViewPreset(int, const BoundingBox&)`、`setProjectionType(ProjectionType)` /
+`projectionType()`、`beginRotate(const QPoint&)`、`rotate(from, to, viewport)`、
+`pan(const QPoint&)`、`zoom(float)`、`fitToView(const BoundingBox&)`、`reset()`、
+`setAspectRatio(float)`。
+
+相机对象禁止拷贝且 `fov` 没有 setter；移动端 `MobileRhiItemRenderer::synchronize()`
+只能用 `setPosition/setTarget/setUp/setProjectionType` 逐字段同步快照（两侧 fov 恒为默认 45°）。
+
 ### TrackBall.h/cpp
 轨迹球控制器，用于 3D 模型的旋转操作。
 
@@ -78,6 +90,10 @@ private:
     QVector3D mapToSphere(const QPointF& point) const;  // 屏幕坐标映射到球面
 };
 ```
+
+`Camera` 内部已集成 TrackBall 语义；桌面的 `RhiWidget` 与移动端的
+`MobileViewerBridge` 都直接调用 `Camera::beginRotate/rotate`，**不单独实例化**
+`TrackBall`（移动端也没有 `MobileGestureHandler`）。
 
 ## 数学算法
 
@@ -110,10 +126,9 @@ private:
 ```cpp
 // 摄像机设置
 Camera camera;
-camera.position = QVector3D(0, 0, 5);
-camera.target = QVector3D(0, 0, 0);
-camera.fov = 45.0f;
-camera.aspectRatio = 16.0f / 9.0f;
+camera.setPosition(QVector3D(0, 0, 5));
+camera.setTarget(QVector3D(0, 0, 0));
+camera.setAspectRatio(16.0f / 9.0f);
 
 // 获取视图投影矩阵
 QMatrix4x4 vp = camera.viewProjectionMatrix();
@@ -121,8 +136,9 @@ QMatrix4x4 vp = camera.viewProjectionMatrix();
 // 包围盒计算
 BoundingBox bbox;
 for (const auto& vertex : vertices) {
-    bbox.extend(vertex.position);
+    bbox.expand(vertex.position);
 }
+float normalLength = qMax(bbox.radius() * 0.15f, 0.05f);
 
 // 轨迹球旋转
 TrackBall trackball;

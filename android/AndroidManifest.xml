@@ -5,19 +5,19 @@
   说明：
   - SAF 的 OPEN_DOCUMENT 不需要任何存储权限，因此本清单不声明
     READ_EXTERNAL_STORAGE / READ_MEDIA_*（区别于移动端扩展文档 §8.1）。
-  - glEsVersion 0x00030001 = OpenGL ES 3.1，与 main_mobile.cpp 中
-    qputenv("QSG_RHI_BACKEND", "opengles") 及 qsb 的 310 es 变体对应。
+  - glEsVersion 0x00030001 = OpenGL ES 3.1：main_mobile.cpp 在 API <= 31
+    的设备上回退到该后端（qsb 的 310 es 变体）；API > 31 使用 Vulkan。
   - 本目录（QT_ANDROID_PACKAGE_SOURCE_DIR）会与 Qt 官方模板合并，
     res/drawable/icon.png 覆盖默认应用图标。
 -->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
-    <!-- OpenGL ES 3.1（必须） -->
+    <!-- OpenGL ES 3.1（低版本系统回退后端） -->
     <uses-feature
         android:glEsVersion="0x00030001"
         android:required="true" />
 
-    <!-- Vulkan 可用则允许，但当前实现固定 GLES 后端 -->
+    <!-- Vulkan 可用则允许（API > 31 时优先使用 Vulkan 后端） -->
     <uses-feature
         android:name="android.hardware.vulkan.level"
         android:required="false" />

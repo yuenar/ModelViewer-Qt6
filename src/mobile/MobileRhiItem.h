@@ -30,6 +30,8 @@
 
 class RhiMesh;
 class RhiRenderer;
+class QRhiReadbackResult;
+class QRhiRenderTarget;
 
 /// @brief QML 中的 3D 渲染控件（替代桌面端 RhiWidget）
 ///
@@ -82,11 +84,15 @@ class MobileRhiItemRenderer : public QQuickRhiItemRenderer {
 
  private:
   void initializeRenderer(QRhiCommandBuffer* cb);
-  void grabFrame(QRhiCommandBuffer* cb);
+  bool grabFrame(QRhiCommandBuffer* cb);
   void flushStats();
 
   RhiRenderer* m_renderer = nullptr;   ///< 复用桌面渲染核心（零改动）
   MobileViewerBridge* m_bridge = nullptr;
+  MobileRhiItem* m_item = nullptr;  ///< 仅用于异步 readback 完成后请求下一帧
+  /// 上一次建管线所用的渲染目标（Qt 每次 sync 都会调 initialize()，
+  /// 只有目标对象换了才需要重建，避免 Vulkan 下销毁在用管线）
+  QRhiRenderTarget* m_lastRt = nullptr;
 
   // ── 场景状态快照（render() 只读这些）──────────────────────────
   Camera m_camera;      ///< Camera 副本（fov 两侧一致，逐字段同步）
@@ -97,7 +103,15 @@ class MobileRhiItemRenderer : public QQuickRhiItemRenderer {
 
   // ── 截图 ──────────────────────────────────────────────────────
   bool m_grabRequested = false;
-  QImage m_grabbedImage;
+  bool m_loggedSceneFrame = false;  ///< 首个有模型的帧只打印一次
+  int m_debugFrameCount = 0;        ///< 只打印前 3 帧的绘制统计
+  bool m_diagReadbackRequested = false;  ///< 一次性颜色纹理回读诊断
+  bool m_diagReadbackDone = false;
+  // 异步后端（Vulkan）的 readback：数据在帧提交后到达，completed 回调只置位，
+  // 图像在下一帧渲染线程内组装（避免在回调里析构自身）
+  QRhiReadbackResult* m_readback = nullptr;
+  bool m_readbackReady = false;
+  QSize m_readbackSize;
 
   // ── FPS / 统计（约 1 秒窗口）──────────────────────────────────
   QElapsedTimer m_fpsTimer;

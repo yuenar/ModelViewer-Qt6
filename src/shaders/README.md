@@ -2,6 +2,15 @@
 
 本目录包含 ModelViewer 所有的着色器文件，支持多种渲染效果和可视化功能。
 
+> **重要**：只有 `src/CMakeLists.txt` 中 `MODELVIEWER_SHADER_FILES` 列出的文件会参与
+> `qt_add_shaders` 编译。所有 `*.geom` 源文件（normals.geom、face_normal.geom、axis.geom、
+> twoside_per_fragment.geom、subdiv.geom 等）**保留但不参与构建**——几何着色器在 HLSL/MSL
+> 没有等价物，法线与线框线段改为 CPU 生成。下文提到 `.geom` 的条目请按此理解。
+>
+> 实际参与编译的清单：phong、flat、wireframe、wire_overlay.frag、normals、normal_lines、
+> background、pbr、shadow_depth、shadowed_phong、skybox、selection、clipped_mesh、cap、
+> text3d、splitScreen、post、axis（均为 .vert/.frag，除 wire_overlay 只有 .frag）。
+
 ## 着色器分类
 
 ### 基础渲染着色器
@@ -145,23 +154,33 @@
 ## 着色器特性
 
 ### 跨平台支持
-- **GLSL** - OpenGL 着色器语言
-- **HLSL** - DirectX 着色器语言  
-- **MSL** - Metal 着色器语言
-- **SPIR-V** - Vulkan 中间表示
+- **GLSL** - 手写源文件，编译为 460（桌面）与 310 es（Android GLES）变体
+- **HLSL 50** - DirectX 11/12 变体（qsb 从 GLSL 转译）
+- **MSL 12** - Metal 变体
+- **SPIR-V** - qsb 从 GLSL 生成、供 Vulkan 后端加载的二进制变体（Android API > 31）
 
 ### 版本兼容
-- **OpenGL ES 2.0/3.0** - 移动设备支持
-- **OpenGL 3.3+** - 桌面端现代特性
-- **DirectX 11/12** - Windows 平台
-- **Metal 2.0+** - Apple 平台
+- **OpenGL ES 3.1（310 es）** - Android 低版本回退后端；清单声明 `glEsVersion 0x00030001`
+- **OpenGL 4.6 / GLSL 460** - 桌面端变体
+- **DirectX 11（HLSL 50）** / **Metal 12（MSL 12）** - 其它桌面后端
 
 ## 编译配置
 
-着色器使用 Qt 的着色器工具（qsb）在构建过程中自动编译。CMake 配置处理：
-- 预编译为 QSB 格式
-- 多目标编译（GLSL、HLSL、MSL）
-- 性能优化
+着色器由 `qt_add_shaders` 在构建时通过 qsb 编译，桌面与 Android 使用同一段配置：
+
+```cmake
+qt_add_shaders(ModelViewer "shaders"
+    GLSL "460,310 es"     # 桌面 460 + Android GLES 310 es
+    HLSL 50
+    MSL 12
+    PRECOMPILE
+    OPTIMIZE
+    FILES ${MODELVIEWER_SHADER_FILES}
+)
+```
+
+`310 es` 变体给 OpenGL ES 3.1 后端；SPIR-V 变体给 Vulkan 后端（Android `SDK_INT > 31`）。
+桌面 Shader Editor 另外在运行时用 `qsb` 编译源码并热重建管线，移动端没有该编辑器。
 
 ## 使用方式
 
@@ -216,11 +235,11 @@ uniform sampler2D u_aoMap;         // 环境光遮蔽贴图
 ## 扩展指南
 
 ### 添加新着色器
-1. 创建 `.vert` 和 `.frag` 文件
-2. 在 CMakeLists.txt 中注册
-3. 在渲染器中创建管线
-4. 添加 uniform 参数绑定
-5. 实现渲染调用逻辑
+1. 创建 `.vert` / `.frag` 文件（不要依赖几何着色器）
+2. 加入 `src/CMakeLists.txt` 的 `MODELVIEWER_SHADER_FILES`（桌面/Android 共用同一列表）
+3. 保留 `GLSL "460,310 es"` 变体字符串，否则 GLES 后端无法加载
+4. 在 `RhiRenderer` 中创建管线并绑定 uniform
+5. 实现渲染调用逻辑并在两种后端上验证
 
 ### 最佳实践
 - 使用描述性的变量名
