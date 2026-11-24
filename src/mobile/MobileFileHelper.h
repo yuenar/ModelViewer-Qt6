@@ -54,6 +54,11 @@ class MobileFileHelper : public QObject {
  private:
   void saveToRecents(const QString& path);
 
+#if defined(Q_OS_ANDROID)
+  /// @brief 真正唤起系统文件选择器（pickModel 内先处理权限后调用）
+  void launchPicker();
+#endif
+
   QStringList m_recents;
 };
 

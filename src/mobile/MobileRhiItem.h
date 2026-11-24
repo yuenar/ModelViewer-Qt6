@@ -103,10 +103,7 @@ class MobileRhiItemRenderer : public QQuickRhiItemRenderer {
 
   // ── 截图 ──────────────────────────────────────────────────────
   bool m_grabRequested = false;
-  bool m_loggedSceneFrame = false;  ///< 首个有模型的帧只打印一次
-  int m_debugFrameCount = 0;        ///< 只打印前 3 帧的绘制统计
-  bool m_diagReadbackRequested = false;  ///< 一次性颜色纹理回读诊断
-  bool m_diagReadbackDone = false;
+  QImage m_grabbedImage;
   // 异步后端（Vulkan）的 readback：数据在帧提交后到达，completed 回调只置位，
   // 图像在下一帧渲染线程内组装（避免在回调里析构自身）
   QRhiReadbackResult* m_readback = nullptr;

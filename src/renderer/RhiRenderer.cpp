@@ -97,12 +97,6 @@ void RhiRenderer::initialize(QRhiCommandBuffer* cb) {
     }
     buildAllPipelines();
 
-    qInfo() << "[RhiRenderer] init backend" << int(m_rhi->backend()) << "target"
-            << m_rt->pixelSize() << "samples" << m_rt->sampleCount() << "post"
-            << isPostEnabled() << "phong" << (m_phongPipeline != nullptr)
-            << "shadowed" << (m_shadowedPhongPipeline != nullptr) << "bg"
-            << (m_bgPipeline != nullptr);
-
     m_diffuseDirty = false;
     m_initialized = true;
 }

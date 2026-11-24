@@ -1,8 +1,10 @@
 // Copyright 2026 ModelViewer Project
 // SPDX-License-Identifier: Apache-2.0
 //
-// 顶部工具栏：打开模型 / 渲染面板 / 适配视图 / 投影切换 / 截图。
-// 图标复用 res/ 下的桌面 PNG（qrc:/icons/...，见 src/CMakeLists.txt）。
+// 顶部工具栏（移动端）：左侧汉堡按钮打开功能抽屉，中间显示当前模型标题。
+// 具体操作项（打开/渲染模式/适配/投影/截图）统一放在
+// MobileViewer.qml 的左侧 Drawer 中，工具栏本身保持精简。
+// 标题允许被压缩（minimumWidth: 0 + 省略号），长文件名不会挤压按钮。
 
 import QtQuick
 import QtQuick.Controls
@@ -14,29 +16,47 @@ ToolBar {
 
     property string title: qsTr("ModelViewer")
 
-    signal openFileRequested
-    signal renderPanelRequested
-    signal fitRequested
-    signal projectionToggled(bool ortho)
-    signal screenshotRequested
+    signal menuRequested
 
     RowLayout {
         anchors.fill: parent
+        anchors.leftMargin: 4
+        anchors.rightMargin: 4
         spacing: 0
 
         ToolButton {
-            icon.source: "qrc:/icons/fileopen.png"
-            icon.width: 24
-            icon.height: 24
-            onClicked: bar.openFileRequested()
+            id: menuButton
+            implicitWidth: 40
+            implicitHeight: 40
+            padding: 0
+            onClicked: bar.menuRequested()
 
-            ToolTip.visible: hovered
-            ToolTip.text: qsTr("打开模型")
-            ToolTip.delay: 600
+            // 三条横线自绘，避免依赖字体里的 ☰ 字形
+            contentItem: Item {
+                implicitWidth: 24
+                implicitHeight: 24
+
+                Column {
+                    anchors.centerIn: parent
+                    spacing: 5
+
+                    Repeater {
+                        model: 3
+
+                        Rectangle {
+                            width: 18
+                            height: 2
+                            radius: 1
+                            color: Material.foreground
+                        }
+                    }
+                }
+            }
         }
 
         Label {
             Layout.fillWidth: true
+            Layout.minimumWidth: 0
             text: bar.title
             font.pixelSize: 15
             font.bold: true
@@ -45,51 +65,10 @@ ToolBar {
             verticalAlignment: Text.AlignVCenter
         }
 
-        ToolButton {
-            icon.source: "qrc:/icons/wireframe.png"
-            icon.width: 24
-            icon.height: 24
-            onClicked: bar.renderPanelRequested()
-
-            ToolTip.visible: hovered
-            ToolTip.text: qsTr("渲染模式")
-            ToolTip.delay: 600
-        }
-
-        ToolButton {
-            icon.source: "qrc:/icons/fit-all.png"
-            icon.width: 24
-            icon.height: 24
-            onClicked: bar.fitRequested()
-
-            ToolTip.visible: hovered
-            ToolTip.text: qsTr("适配视图")
-            ToolTip.delay: 600
-        }
-
-        ToolButton {
-            id: projectionButton
-            checkable: true
-            icon.source: checked ? "qrc:/icons/Ortho.png"
-                                 : "qrc:/icons/Perspective.png"
-            icon.width: 24
-            icon.height: 24
-            onCheckedChanged: bar.projectionToggled(checked)
-
-            ToolTip.visible: hovered
-            ToolTip.text: checked ? qsTr("当前: 正交投影") : qsTr("当前: 透视投影")
-            ToolTip.delay: 600
-        }
-
-        ToolButton {
-            icon.source: "qrc:/icons/export.png"
-            icon.width: 24
-            icon.height: 24
-            onClicked: bar.screenshotRequested()
-
-            ToolTip.visible: hovered
-            ToolTip.text: qsTr("截图")
-            ToolTip.delay: 600
+        // 右侧占位，与左侧按钮等宽，保证标题在视觉上居中
+        Item {
+            implicitWidth: menuButton.implicitWidth
+            implicitHeight: 1
         }
     }
 }

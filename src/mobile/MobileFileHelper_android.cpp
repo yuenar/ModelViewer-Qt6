@@ -15,15 +15,15 @@
 /// @brief MobileFileHelper 的 Android 实现（SAF + JNI）
 ///
 /// 流程：
+/// 0. API <= 32 时先申请 READ_EXTERNAL_STORAGE（老机型上部分文件管理器
+///    返回的是可直接读取的本地路径，需要该权限）；用户拒绝也继续，
+///    SAF 的 content:// 流程本身不需要任何权限；
 /// 1. 构造 ACTION_OPEN_DOCUMENT intent（OPENABLE + 多 MIME 过滤）；
 /// 2. QtAndroidPrivate::startActivity 等待系统文件选择器；
 /// 3. RESULT_OK 时拿到 content:// URI；
 /// 4. ContentResolver.openInputStream 循环拷贝到应用 cache
 ///    （Assimp 无法直接读 content URI）；
 /// 5. emit fileSelected(本地缓存路径)，recents 记录原始显示名。
-///
-/// SAF 的 OPEN_DOCUMENT 不需要任何存储权限（对应 android/
-/// AndroidManifest.xml 未声明 READ_EXTERNAL_STORAGE）。
 
 // 注意：Q_OS_ANDROID 由 qglobal.h 定义，必须在下面的 #if 之前引入，
 // 否则条件永远为假，整个文件被预处理掉（导致 pickModel 链接未定义）。
@@ -164,6 +164,23 @@ bool copyContentUriToFile(const QJniObject& uri, const QString& destPath) {
 }  // namespace
 
 void MobileFileHelper::pickModel() {
+  // API <= 32：先申请传统存储读权限（部分机型/文件管理器返回的是可直接
+  // 读取的本地路径，读取前需要该权限；SAF 的 content:// 流程本身不需要）。
+  // 无论用户是否授予都继续唤起选择器——SAF 模式下权限被拒也能正常选文件。
+  const int sdkInt =
+      QJniObject::getStaticField<jint>("android/os/Build$VERSION", "SDK_INT");
+  if (sdkInt > 0 && sdkInt <= 32) {
+    QtAndroidPrivate::requestPermission(
+        QStringLiteral("android.permission.READ_EXTERNAL_STORAGE"))
+        .then(this, [this](QtAndroidPrivate::PermissionResult) {
+          launchPicker();
+        });
+    return;
+  }
+  launchPicker();
+}
+
+void MobileFileHelper::launchPicker() {
   // 1) ACTION_OPEN_DOCUMENT + OPENABLE + 类型过滤
   QJniObject intent(
       "android/content/Intent", "(Ljava/lang/String;)V",

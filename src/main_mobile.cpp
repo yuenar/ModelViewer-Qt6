@@ -99,17 +99,6 @@ int main(int argc, char* argv[]) {
         []() { QCoreApplication::exit(-1); }, Qt::QueuedConnection);
     engine.load(url);
 
-    // 诊断：确认 Qt Quick 实际使用的渲染 API（Vulkan=5 / OpenGL=2）
-    if (auto* rootWin =
-            qobject_cast<QQuickWindow*>(engine.rootObjects().value(0))) {
-        QObject::connect(
-            rootWin, &QQuickWindow::sceneGraphInitialized, rootWin,
-            [rootWin]() {
-                qInfo() << "[RHI] graphicsApi ="
-                        << int(rootWin->rendererInterface()->graphicsApi());
-            });
-    }
-
     // 说明：单例对象不设 parent（qmlRegisterSingletonInstance 不接管所有权）；
     // 进程退出时由操作系统回收，避免与 engine 析构顺序竞争。
 

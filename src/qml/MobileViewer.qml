@@ -20,6 +20,10 @@ ApplicationWindow {
     StackView {
         id: pageStack
         anchors.fill: parent
+        // Android 15 起强制 edge-to-edge，窗口会画到状态栏/手势条下面；
+        // 用 SafeArea 让内容整体避开系统栏（Qt 已内缩时该值为 0，无副作用）。
+        anchors.topMargin: SafeArea.margins.top
+        anchors.bottomMargin: SafeArea.margins.bottom
         initialItem: mainViewComponent
     }
 
@@ -36,11 +40,7 @@ ApplicationWindow {
                 anchors.left: parent.left
                 anchors.right: parent.right
                 title: ViewerBridge.modelLabel
-                onOpenFileRequested: pageStack.push(modelListComponent)
-                onRenderPanelRequested: renderPanel.open()
-                onFitRequested: ViewerBridge.fitView()
-                onProjectionToggled: (ortho) => ViewerBridge.setOrthographic(ortho)
-                onScreenshotRequested: ViewerBridge.saveScreenshot()
+                onMenuRequested: menuDrawer.open()
             }
 
             // 3D 渲染区域（MobileRhiItem，渲染线程）
@@ -139,6 +139,132 @@ ApplicationWindow {
         onDisplayStyleSelected: (style) => ViewerBridge.setDisplayStyle(style)
     }
 
+    // ── 左侧功能抽屉（工具栏汉堡按钮打开）───────────────────────────
+    Drawer {
+        id: menuDrawer
+
+        edge: Qt.LeftEdge
+        width: Math.min(root.width * 0.78, 320)
+
+        // 打开任意一项后收起抽屉。
+        // 注意：若动作是打开另一个 Drawer（如渲染面板），必须等本抽屉
+        // 的关闭动画结束（onClosed）再执行，否则两个 Popup 同时切换会失败。
+        property var pendingAction: null
+
+        function closeAnd(action) {
+            close()
+            action()
+        }
+
+        function runAfterClose(action) {
+            pendingAction = action
+            close()
+        }
+
+        onClosed: {
+            if (pendingAction) {
+                const action = pendingAction
+                pendingAction = null
+                action()
+            }
+        }
+
+        Column {
+            anchors.fill: parent
+            // 避让状态栏 / 底部手势条（Qt 已内缩时该值为 0）
+            anchors.topMargin: SafeArea.margins.top
+            anchors.bottomMargin: SafeArea.margins.bottom
+            spacing: 0
+
+            Label {
+                width: parent.width
+                height: 52
+                leftPadding: 16
+                text: qsTr("ModelViewer")
+                font.pixelSize: 16
+                font.bold: true
+                verticalAlignment: Text.AlignVCenter
+            }
+
+            Rectangle {
+                width: parent.width
+                height: 1
+                color: "#33ffffff"
+            }
+
+            ItemDelegate {
+                width: parent.width
+                text: qsTr("打开模型")
+                icon.source: "qrc:/icons/fileopen.png"
+                icon.width: 24
+                icon.height: 24
+                // 直接弹系统文件选择器（Android SAF 授权弹窗）
+                onClicked: {
+                    menuDrawer.close()
+                    FileHelper.pickModel()
+                }
+            }
+
+            ItemDelegate {
+                width: parent.width
+                text: qsTr("模型库")
+                icon.source: "qrc:/icons/section.png"
+                icon.width: 24
+                icon.height: 24
+                onClicked: menuDrawer.closeAnd(
+                               () => pageStack.push(modelListComponent))
+            }
+
+            ItemDelegate {
+                width: parent.width
+                text: qsTr("渲染模式")
+                // wireframe.png 是深灰线框，深色抽屉上几乎不可见，改用浅色图标
+                icon.source: "qrc:/icons/shaded.png"
+                icon.width: 24
+                icon.height: 24
+                // 渲染面板也是 Drawer：必须等本抽屉关闭动画结束再打开
+                onClicked: menuDrawer.runAfterClose(() => renderPanel.open())
+            }
+
+            ItemDelegate {
+                width: parent.width
+                text: qsTr("适配视图")
+                icon.source: "qrc:/icons/fit-all.png"
+                icon.width: 24
+                icon.height: 24
+                onClicked: menuDrawer.closeAnd(() => ViewerBridge.fitView())
+            }
+
+            ItemDelegate {
+                width: parent.width
+                text: qsTr("正交投影")
+                icon.source: orthoSwitch.checked ? "qrc:/icons/Ortho.png"
+                                                 : "qrc:/icons/Perspective.png"
+                icon.width: 24
+                icon.height: 24
+                onClicked: orthoSwitch.toggle()
+
+                Switch {
+                    id: orthoSwitch
+                    anchors.right: parent.right
+                    anchors.rightMargin: 12
+                    anchors.verticalCenter: parent.verticalCenter
+                    onToggled: ViewerBridge.setOrthographic(checked)
+                }
+            }
+
+            ItemDelegate {
+                width: parent.width
+                text: qsTr("截图")
+                icon.source: "qrc:/icons/export.png"
+                icon.width: 24
+                icon.height: 24
+                onClicked: menuDrawer.closeAnd(
+                               () => ViewerBridge.saveScreenshot())
+            }
+        }
+    }
+
     // ── 提示横幅（错误 / 截图结果）────────────────────────────────
     Rectangle {
         id: banner
@@ -147,6 +273,8 @@ ApplicationWindow {
         anchors.left: parent.left
         anchors.right: parent.right
         anchors.bottom: parent.bottom
+        // 避让底部手势条
+        anchors.bottomMargin: SafeArea.margins.bottom
         height: 44
         color: "#c6222222"
 
