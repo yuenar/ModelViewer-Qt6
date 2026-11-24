@@ -37,6 +37,8 @@
 #include <QStandardPaths>
 #include <QJniEnvironment>
 #include <QJniObject>
+// QNativeInterface::QAndroidApplication（context()）声明于此头
+#include <QtCore/qcoreapplication_platform.h>
 
 #include <QtCore/private/qandroidextras_p.h>
 

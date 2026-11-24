@@ -108,9 +108,11 @@ if(ANDROID)
     target_compile_definitions(ModelViewer PRIVATE PLATFORM_ANDROID)
 
     # Qt6::CorePrivate：qandroidextras_p.h（SAF / JNI 调用需要）
+    # Qt6::GuiPrivate：rhi/qrhi.h 等 QtGui 私有头（RhiRenderer/BufferPool/
+    #                 RhiMesh 需要，与桌面构建一致）
     target_link_libraries(ModelViewer PRIVATE
         Qt6::Core Qt6::Gui Qt6::Quick Qt6::QuickControls2
-        Qt6::Concurrent Qt6::ShaderTools Qt6::CorePrivate
+        Qt6::Concurrent Qt6::ShaderTools Qt6::CorePrivate Qt6::GuiPrivate
         assimp::assimp
     )
 

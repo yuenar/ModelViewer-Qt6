@@ -24,8 +24,10 @@
 #include "../core/Light.h"
 #include "../core/Material.h"
 #include "../math/Camera.h"
+// 完整定义（而非前置声明）：Q_PROPERTY(MobileViewerBridge*) 的指针
+// metatype 在 moc 编译期要求指向完整类型（Qt 6.8+ qtmochelpers 断言）
+#include "MobileViewerBridge.h"
 
-class MobileViewerBridge;
 class RhiMesh;
 class RhiRenderer;
 
