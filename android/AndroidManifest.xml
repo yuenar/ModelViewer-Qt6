@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  ModelViewer Android 清单（Qt 6.9+ 模板风格）
+
+  说明：
+  - SAF 的 OPEN_DOCUMENT 不需要任何存储权限，因此本清单不声明
+    READ_EXTERNAL_STORAGE / READ_MEDIA_*（区别于移动端扩展文档 §8.1）。
+  - glEsVersion 0x00030001 = OpenGL ES 3.1，与 main_mobile.cpp 中
+    qputenv("QSG_RHI_BACKEND", "opengles") 及 qsb 的 310 es 变体对应。
+  - 本目录（QT_ANDROID_PACKAGE_SOURCE_DIR）会与 Qt 官方模板合并，
+    res/drawable/icon.png 覆盖默认应用图标。
+-->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- OpenGL ES 3.1（必须） -->
+    <uses-feature
+        android:glEsVersion="0x00030001"
+        android:required="true" />
+
+    <!-- Vulkan 可用则允许，但当前实现固定 GLES 后端 -->
+    <uses-feature
+        android:name="android.hardware.vulkan.level"
+        android:required="false" />
+    <uses-feature
+        android:name="android.hardware.vulkan.version"
+        android:required="false" />
+
+    <!-- 触摸屏设备 -->
+    <uses-feature
+        android:name="android.hardware.touchscreen"
+        android:required="false" />
+
+    <application
+        android:label="ModelViewer"
+        android:icon="@drawable/icon"
+        android:hardwareAccelerated="true">
+
+        <activity
+            android:name="org.qtproject.qt.android.bindings.QtActivity"
+            android:exported="true"
+            android:screenOrientation="fullSensor"
+            android:launchMode="singleTop"
+            android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|keyboardHidden|keyboard|navigation|uiMode|density|locale|layoutDirection">
+
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+
+            <!-- 加载的 Qt 主库（target 名 ModelViewer → libModelViewer.so） -->
+            <meta-data
+                android:name="android.app.lib_name"
+                android:value="ModelViewer" />
+        </activity>
+    </application>
+</manifest>

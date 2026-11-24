@@ -1,35 +1,10 @@
 # 源文件与着色器定义（工程级配置见仓库根目录 CMakeLists.txt）
 
-# 收集源文件
-file(GLOB_RECURSE CORE_SOURCES "core/*.cpp" "core/*.h")
-file(GLOB_RECURSE RENDERER_SOURCES "renderer/*.cpp" "renderer/*.h")
-file(GLOB_RECURSE UI_SOURCES "ui/*.cpp" "ui/*.h")
-file(GLOB_RECURSE LOADER_SOURCES "loader/*.cpp" "loader/*.h")
-file(GLOB_RECURSE MATH_SOURCES "math/*.cpp" "math/*.h")
-file(GLOB_RECURSE NET_SOURCES "net/*.cpp" "net/*.h")
-file(GLOB_RECURSE PLUGIN_SOURCES "plugin/*.cpp" "plugin/*.h")
-
-qt_add_executable(ModelViewer
-    main.cpp
-    ${CORE_SOURCES}
-    ${RENDERER_SOURCES}
-    ${UI_SOURCES}
-    ${LOADER_SOURCES}
-    ${MATH_SOURCES}
-    ${NET_SOURCES}
-    ${PLUGIN_SOURCES}
-)
-
-# ── 着色器：统一编译为多后端 QSB（GLSL 460 / HLSL 50 / MSL 12）────────
-# 说明：几何着色器在 HLSL/MSL 后端没有等价物，本项目改用 CPU 生成线段，
-#       shaders/*.geom 不再参与编译。
-qt_add_shaders(ModelViewer "shaders"
-    GLSL "460"
-    HLSL 50
-    MSL 12
-    PRECOMPILE
-    OPTIMIZE
-    FILES
+# ── 着色器文件清单（桌面 / Android 移动端共享同一份列表）──────────
+# 说明：GLSL 变体统一为 "460,310 es"——桌面继续使用 460 条目，
+#       Android OpenGL ES 3.1 后端使用 310 es 条目（qsb 多带一个
+#       变体对桌面运行时无影响；着色器源码本身不改动）。
+set(MODELVIEWER_SHADER_FILES
     shaders/phong.vert
     shaders/phong.frag
     shaders/flat.vert
@@ -65,6 +40,126 @@ qt_add_shaders(ModelViewer "shaders"
     shaders/post.frag
     shaders/axis.vert
     shaders/axis.frag
+)
+
+# ══════════════════════════════════════════════════════════════════
+#  Android 移动端（Qt Quick + QQuickRhiItem + GLES 3.1）
+#  - 不编译 ui/ net/ plugin/（桌面专属：MainWindow、协作会话、脚本插件）
+#  - 入口 main_mobile.cpp，QML 位于 src/qml/
+#  - 图标复用 res/ 下的现有 PNG
+# ══════════════════════════════════════════════════════════════════
+if(ANDROID)
+    file(GLOB_RECURSE MOBILE_PORTABLE_SOURCES
+        "core/*.cpp" "core/*.h"
+        "loader/*.cpp" "loader/*.h"
+        "math/*.cpp" "math/*.h"
+        "renderer/*.cpp" "renderer/*.h")
+    file(GLOB_RECURSE MOBILE_BRIDGE_SOURCES
+        "mobile/*.cpp" "mobile/*.h")
+
+    qt_add_executable(ModelViewer
+        main_mobile.cpp
+        ${MOBILE_PORTABLE_SOURCES}
+        ${MOBILE_BRIDGE_SOURCES}
+    )
+
+    # QML 模块（C++ 类型 RhiView / 单例 ViewerBridge / FileHelper
+    # 在 main_mobile.cpp 中手动注册到同一 URI）
+    qt_add_qml_module(ModelViewer
+        URI "ModelViewer"
+        VERSION 1.0
+        QML_FILES
+            qml/MobileViewer.qml
+            qml/ViewerToolBar.qml
+            qml/GestureArea.qml
+            qml/ModelListPage.qml
+            qml/RenderModePanel.qml
+    )
+
+    # 移动端工具栏图标（复用桌面 res/ 资源，qrc:/icons/...）
+    qt_add_resources(ModelViewer "mobile_icons"
+        PREFIX "/icons"
+        BASE "../res"
+        FILES
+            ../res/fileopen.png
+            ../res/wireframe.png
+            ../res/fit-all.png
+            ../res/Ortho.png
+            ../res/Perspective.png
+            ../res/export.png
+            ../res/shaded.png
+            ../res/section.png
+    )
+
+    qt_add_shaders(ModelViewer "shaders"
+        GLSL "460,310 es"
+        HLSL 50
+        MSL 12
+        PRECOMPILE
+        OPTIMIZE
+        FILES ${MODELVIEWER_SHADER_FILES}
+    )
+
+    set_target_properties(ModelViewer PROPERTIES
+        QT_ANDROID_PACKAGE_SOURCE_DIR "${CMAKE_SOURCE_DIR}/android"
+        QT_ANDROID_MIN_SDK_VERSION 26
+        QT_ANDROID_TARGET_SDK_VERSION 34
+    )
+    target_compile_definitions(ModelViewer PRIVATE PLATFORM_ANDROID)
+
+    # Qt6::CorePrivate：qandroidextras_p.h（SAF / JNI 调用需要）
+    target_link_libraries(ModelViewer PRIVATE
+        Qt6::Core Qt6::Gui Qt6::Quick Qt6::QuickControls2
+        Qt6::Concurrent Qt6::ShaderTools Qt6::CorePrivate
+        assimp::assimp
+    )
+
+    # 移动端同样可选 OpenMP（NDK clang 提供 libomp）
+    find_package(OpenMP QUIET)
+    if(OpenMP_CXX_FOUND)
+        target_link_libraries(ModelViewer PRIVATE OpenMP::OpenMP_CXX)
+    endif()
+
+    # 移动端不需要：桌面光标资源、POST_BUILD 着色器拷贝（运行时
+    # 着色器编辑是桌面 ShaderEditor 的功能）
+    return()
+endif()
+
+# ══════════════════════════════════════════════════════════════════
+#  桌面端（Windows / macOS / Linux，原有构建，保持不变）
+# ══════════════════════════════════════════════════════════════════
+
+# 收集源文件
+file(GLOB_RECURSE CORE_SOURCES "core/*.cpp" "core/*.h")
+file(GLOB_RECURSE RENDERER_SOURCES "renderer/*.cpp" "renderer/*.h")
+file(GLOB_RECURSE UI_SOURCES "ui/*.cpp" "ui/*.h")
+file(GLOB_RECURSE LOADER_SOURCES "loader/*.cpp" "loader/*.h")
+file(GLOB_RECURSE MATH_SOURCES "math/*.cpp" "math/*.h")
+file(GLOB_RECURSE NET_SOURCES "net/*.cpp" "net/*.h")
+file(GLOB_RECURSE PLUGIN_SOURCES "plugin/*.cpp" "plugin/*.h")
+
+qt_add_executable(ModelViewer
+    main.cpp
+    ${CORE_SOURCES}
+    ${RENDERER_SOURCES}
+    ${UI_SOURCES}
+    ${LOADER_SOURCES}
+    ${MATH_SOURCES}
+    ${NET_SOURCES}
+    ${PLUGIN_SOURCES}
+)
+
+# ── 着色器：统一编译为多后端 QSB（GLSL 460+310es / HLSL 50 / MSL 12）
+# 说明：几何着色器在 HLSL/MSL 后端没有等价物，本项目改用 CPU 生成线段，
+#       shaders/*.geom 不再参与编译。
+#       310 es 变体供 Android OpenGL ES 3.1 后端使用（对桌面无影响）。
+qt_add_shaders(ModelViewer "shaders"
+    GLSL "460,310 es"
+    HLSL 50
+    MSL 12
+    PRECOMPILE
+    OPTIMIZE
+    FILES ${MODELVIEWER_SHADER_FILES}
 )
 
 target_link_libraries(ModelViewer PRIVATE
